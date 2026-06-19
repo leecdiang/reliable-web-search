@@ -29,11 +29,12 @@ export async function reliableSearch(
         provider: hit.provider,
         providerPath: hit.providerPath,
         fallbackReason: undefined,
-        attempts: [],
+        attempts: hit.attempts,
         elapsedMs: 0,
-        retrievalSucceeded: true,
+        retrievalSucceeded: hit.results.length > 0,
         usableForReview: hit.results.length > 0,
         resultStatus: hit.results.length > 0 ? 'success' : 'no_results',
+        cacheHit: true,
       };
     }
   }
@@ -60,6 +61,7 @@ export async function reliableSearch(
     retrievalSucceeded: raw.retrievalSucceeded,
     usableForReview: raw.usableForReview,
     resultStatus: raw.resultStatus,
+    cacheHit: false,
   };
 
   if (useCache) {

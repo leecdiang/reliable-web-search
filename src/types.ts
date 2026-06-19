@@ -181,6 +181,8 @@ export interface ReliableSearchResult {
   retrievalSucceeded: boolean;
   usableForReview: boolean;
   resultStatus: ResultStatus;
+  /** True when this result came from the in-memory cache */
+  cacheHit: boolean;
 }
 
 export interface AttemptRecord {

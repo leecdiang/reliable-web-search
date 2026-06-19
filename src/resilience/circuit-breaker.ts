@@ -115,11 +115,17 @@ export class BreakerRegistry {
     this._opts = opts ?? {};
   }
 
-  get(providerId: string): CircuitBreaker {
+  get(providerId: string, opts?: Partial<BreakerOptions>): CircuitBreaker {
     let breaker = this._breakers.get(providerId);
+    const effectiveOpts = opts ?? this._opts;
     if (!breaker) {
-      breaker = new CircuitBreaker(providerId, this._opts);
+      breaker = new CircuitBreaker(providerId, effectiveOpts);
       this._breakers.set(providerId, breaker);
+    } else if (opts && Object.keys(opts).length > 0) {
+      // Per-call config overrides: replace breaker with custom settings
+      const newBreaker = new CircuitBreaker(providerId, { ...this._opts, ...opts });
+      this._breakers.set(providerId, newBreaker);
+      return newBreaker;
     }
     return breaker;
   }

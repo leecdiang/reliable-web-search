@@ -18,9 +18,8 @@ Every web search API fails — rate limits, auth expiry, network hiccups. `relia
 
 - **Provider routing** — auto-detects available providers from env vars, falls back in priority order
 - **Quality gates** — empty results trigger fallthrough; configurable minimum result thresholds
-- **Real cancellation** — race mode aborts losers via AbortController; timeout aborts stuck requests
+- **Real cancellation** — race mode aborts losers via per-provider AbortController; timeout truly aborts stuck requests
 - **Circuit breaker** — isolates failing providers with three-state health tracking
-- **Result validation** — rejects placeholder URLs, empty titles, and search-engine redirect pages
 - **Structured diagnostics** — every attempt logged with provider, status, timing, and error classification
 
 ## Providers
