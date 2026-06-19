@@ -1,0 +1,68 @@
+{
+  "name": "reliable-web-search",
+  "version": "0.1.0",
+  "description": "Multi-provider web search with automatic fallback, circuit breaking, and zero-config defaults — for AI agents and resilient apps.",
+  "keywords": [
+    "web-search",
+    "search-api",
+    "fallback",
+    "circuit-breaker",
+    "resilience",
+    "multi-provider",
+    "brave-search",
+    "bocha-search",
+    "duckduckgo",
+    "metaso",
+    "gemini",
+    "tavily",
+    "serpapi",
+    "searxng",
+    "ai-agent",
+    "rag",
+    "typescript"
+  ],
+  "author": "Diang <hi@diang.fun>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Social-Enthusiasts/reliable-web-search"
+  },
+  "homepage": "https://github.com/Social-Enthusiasts/reliable-web-search#readme",
+  "bugs": {
+    "url": "https://github.com/Social-Enthusiasts/reliable-web-search/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "node --import tsx --test tests/*.test.ts tests/**/*.test.ts",
+    "test:watch": "node --import tsx --test --watch tests/*.test.ts tests/**/*.test.ts",
+    "prepublishOnly": "npm run build",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "tsx": "^4.19.0",
+    "@types/node": "^22.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "sideEffects": false
+}
