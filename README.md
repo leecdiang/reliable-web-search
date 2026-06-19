@@ -2,7 +2,7 @@
 
 **Multi-provider web search with automatic fallback, circuit breaking, and zero-config defaults.**
 
-[![version](https://img.shields.io/badge/version-v0.1.0-blue)](https://github.com/leecdiang/reliable-web-search/releases)
+[![version](https://img.shields.io/github/v/release/leecdiang/reliable-web-search)](https://github.com/leecdiang/reliable-web-search/releases)
 [![license](https://img.shields.io/github/license/leecdiang/reliable-web-search)](LICENSE)
 [![node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](package.json)
 

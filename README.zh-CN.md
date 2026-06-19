@@ -2,7 +2,7 @@
 
 **多供应商 Web 搜索，自动降级、熔断保护、零配置启动。**
 
-[![version](https://img.shields.io/badge/version-v0.1.0-blue)](https://github.com/leecdiang/reliable-web-search/releases)
+[![version](https://img.shields.io/github/v/release/leecdiang/reliable-web-search)](https://github.com/leecdiang/reliable-web-search/releases)
 [![license](https://img.shields.io/github/license/leecdiang/reliable-web-search)](LICENSE)
 
 [English](./README.md)
