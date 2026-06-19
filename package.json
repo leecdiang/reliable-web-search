@@ -50,16 +50,18 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsup",
     "test": "node --import tsx --test tests/*.test.ts tests/**/*.test.ts",
     "test:watch": "node --import tsx --test --watch tests/*.test.ts tests/**/*.test.ts",
-    "prepublishOnly": "npm run build",
+    "test:smoke": "npm run build && node --test tests/smoke.test.mjs",
+    "prepublishOnly": "npm run build && npm test",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "typescript": "^5.7.0",
+    "@types/node": "^22.0.0",
+    "tsup": "^8.5.1",
     "tsx": "^4.19.0",
-    "@types/node": "^22.0.0"
+    "typescript": "^5.7.0"
   },
   "engines": {
     "node": ">=18.0.0"
