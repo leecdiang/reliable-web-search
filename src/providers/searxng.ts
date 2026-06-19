@@ -49,11 +49,15 @@ export const searxngProvider: SearchProvider = {
     freshnessSupport: true,
   },
   isConfigured(): boolean {
-    return typeof process.env.SEARXNG_BASE_URL === 'string' && process.env.SEARXNG_BASE_URL!.trim().length > 0;
+    const url = process.env.SEARXNG_BASE_URL;
+    return typeof url === 'string' && url.trim().length > 0;
   },
 
   async search(params: SearchParams): Promise<ProviderSearchResult> {
-    const baseUrl = process.env.SEARXNG_BASE_URL || 'http://localhost:8080';
+    const baseUrl = process.env.SEARXNG_BASE_URL;
+    if (!baseUrl || !baseUrl.trim()) {
+      throw new Error('missing_api_key: SearXNG requires SEARXNG_BASE_URL environment variable pointing to your instance.');
+    }
     const url = new URL('/search', baseUrl);
     url.searchParams.set('q', params.query);
     url.searchParams.set('format', 'json');

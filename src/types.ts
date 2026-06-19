@@ -101,6 +101,8 @@ export interface ProviderCapabilities {
   maxResults: number;
   /** Supported freshness/date filters */
   freshnessSupport: boolean;
+  /** True when the provider's API contract is not yet verified against real responses */
+  experimental?: boolean;
 }
 
 export interface SearchProvider {

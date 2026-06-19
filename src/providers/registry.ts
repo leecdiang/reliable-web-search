@@ -28,11 +28,13 @@ class Registry implements IProviderRegistry {
   detect(): SearchProvider[] {
     const available: SearchProvider[] = [];
     for (const provider of this.list()) {
-      if (!provider.requiresKey) {
+      // If provider has isConfigured(), use it as the gate
+      if (provider.isConfigured) {
+        if (!provider.isConfigured()) continue;
         available.push(provider);
         continue;
       }
-      if (provider.isConfigured && provider.isConfigured()) {
+      if (!provider.requiresKey) {
         available.push(provider);
         continue;
       }
@@ -41,7 +43,6 @@ class Registry implements IProviderRegistry {
       );
       if (hasKey) available.push(provider);
     }
-    // Already sorted by priority from list()
     return available;
   }
 

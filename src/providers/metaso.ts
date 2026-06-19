@@ -38,6 +38,7 @@ export const metasoProvider: SearchProvider = {
     aiGenerated: true,
     maxResults: 20,
     freshnessSupport: false,
+    experimental: true,  // API contract not yet verified against real responses
   },
 
   async search(params: SearchParams): Promise<ProviderSearchResult> {

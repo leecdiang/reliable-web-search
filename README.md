@@ -1,6 +1,6 @@
 # reliable-web-search
 
-**Multi-provider web search with automatic fallback, circuit breaking, and zero-config defaults.**
+**Policy-driven multi-provider web search runtime for AI agents and resilient applications.**
 
 [![version](https://img.shields.io/github/v/release/leecdiang/reliable-web-search)](https://github.com/leecdiang/reliable-web-search/releases)
 [![license](https://img.shields.io/github/license/leecdiang/reliable-web-search)](LICENSE)
@@ -8,15 +8,37 @@
 
 ---
 
-## Why
+## What it is
 
-Every web search API fails sometimes — rate limits, auth expiry, network hiccups. `reliable-web-search` handles this for you:
+Every web search API fails — rate limits, auth expiry, network hiccups. `reliable-web-search` is a **routing and resilience layer** that sits between your app and multiple search providers. It handles provider selection, failover, result validation, and cancellation so you don't have to.
 
-- **Try providers in order** — first one fails? Next one takes over
-- **Circuit breaker** — stops calling a failing provider for 60s
-- **Zero-config start** — DuckDuckGo works out of the box
-- **Auto-detect credentials** — set env vars, the best provider is picked automatically
-- **Unified results** — all providers return the same clean format
+**This is not a "search everything" aggregator.** It's a policy engine: you define which providers to try, in what order, what counts as success, and what triggers fallback.
+
+## Core capabilities
+
+- **Provider routing** — auto-detects available providers from env vars, falls back in priority order
+- **Quality gates** — empty results trigger fallthrough; configurable minimum result thresholds
+- **Real cancellation** — race mode aborts losers via AbortController; timeout aborts stuck requests
+- **Circuit breaker** — isolates failing providers with three-state health tracking
+- **Result validation** — rejects placeholder URLs, empty titles, and search-engine redirect pages
+- **Structured diagnostics** — every attempt logged with provider, status, timing, and error classification
+
+## Providers
+
+| Provider | ID | Priority | Type | Status |
+|----------|----|----------|------|--------|
+| Brave | `brave` | 10 | Full web search | ✅ Verified |
+| Tavily | `tavily` | 11 | Full web search | ✅ Verified |
+| Bocha (博查) | `bocha` | 12 | Full web search | ⚠️ Experimental |
+| Metaso (秘塔) | `metaso` | 15 | AI search | ⚠️ Experimental |
+| Gemini | `gemini` | 20 | AI grounding | ✅ Verified |
+| SerpAPI | `serpapi` | 30 | Multi-engine | ✅ Verified |
+| SearXNG | `searxng` | 50 | Self-hosted | ✅ Verified |
+| DuckDuckGo | `duckduckgo` | 100 | Instant Answer* | ✅ Verified |
+
+**\*DuckDuckGo uses the Instant Answer API, not full web search.** It returns encyclopedia-style topic summaries, not a comprehensive web results page. It is a lowest-priority fallback — useful for zero-config prototyping, not production search.
+
+Providers marked **Experimental** have API contracts that need verification against real responses. They are included in the package but may produce parse errors.
 
 ## Quick Start
 
@@ -27,47 +49,26 @@ npm install reliable-web-search
 ```ts
 import { reliableSearch } from 'reliable-web-search';
 
-// Zero config — uses DuckDuckGo (no API key needed)
-const result = await reliableSearch('quantum computing');
+// Zero config uses DuckDuckGo Instant Answer (limited, but no key needed)
+const result = await reliableSearch('RISC-V vector extension');
 
+console.log(result.provider);      // 'duckduckgo'
+console.log(result.resultStatus);  // 'success' | 'no_results' | ...
 console.log(result.results);
-// [
-//   { title: '...', url: 'https://...', snippet: '...', provider: 'duckduckgo' },
-//   ...
-// ]
-
-console.log(result.provider);    // 'duckduckgo'
-console.log(result.elapsedMs);   // 342
 ```
-
-## Add API Keys (better results, still automatic)
 
 ```bash
-# Set one or more API keys as environment variables
-export BRAVE_API_KEY="your-key"     # https://brave.com/search/api/
-export BOCHA_API_KEY="your-key"     # https://open.bochaai.com
-export METASO_API_KEY="your-key"    # https://metaso.cn
-export TAVILY_API_KEY="your-key"    # https://tavily.com
-export GEMINI_API_KEY="your-key"    # https://aistudio.google.com/apikey
-export SERPAPI_API_KEY="your-key"   # https://serpapi.com
-export SEARXNG_BASE_URL="http://localhost:8080"  # Self-hosted SearXNG
+# Set API keys for better results — auto-detected in priority order
+export BRAVE_API_KEY="***"       # https://brave.com/search/api/
+export BOCHA_API_KEY="***"       # https://open.bochaai.com
+export TAVILY_API_KEY="***"      # https://tavily.com
+export GEMINI_API_KEY="***"      # https://aistudio.google.com/apikey
+export SEARXNG_BASE_URL="https://your-instance.example.com"
 ```
 
 ```ts
-// No code changes needed — auto-detects which providers have credentials
-const result = await reliableSearch('RISC-V vector extension');
-// Uses Brave → Tavily → DuckDuckGo (whatever has keys set)
-```
-
-## Explicit Provider Chain
-
-```ts
-const result = await reliableSearch('量子计算', {
-  providers: ['bocha', 'metaso', 'duckduckgo'],
-  count: 10,
-  language: 'zh',
-  freshness: 'month',
-});
+// Same code, now auto-uses Brave → Tavily → DDG based on what's configured
+const result = await reliableSearch('quantum computing');
 ```
 
 ## API
@@ -77,65 +78,44 @@ const result = await reliableSearch('量子计算', {
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `query` | `string` | *(required)* | Search query |
-| `providers` | `string[]` | auto-detect | Ordered provider priority list |
-| `count` | `number` | `5` | Max results (1–20) |
-| `country` | `string` | — | ISO 3166-1 alpha-2 country code |
-| `language` | `string` | — | ISO 639-1 language code |
-| `freshness` | `'day' \| 'week' \| 'month' \| 'year'` | — | Time filter |
+| `providers` | `string[]` | auto-detect | Provider priority list by id |
+| `count` | `number` | `5` | Results to return (1–20) |
+| `country` | `string` | — | ISO 3166-1 alpha-2 |
+| `language` | `string` | — | ISO 639-1 |
+| `freshness` | `'day'\|'week'\|'month'\|'year'` | — | Time filter |
 | `timeout` | `number` | `15000` | Per-provider timeout (ms) |
-| `signal` | `AbortSignal` | — | Cancel the search |
-| `fallback` | `FallbackConfig` | sequential | Fallback strategy |
-| `cache` | `CacheConfig` | enabled | Result caching |
+| `minResults` | `number` | `1` | Minimum results to count as success |
+| `fallback.mode` | `'fallback'\|'race'\|'aggregate'` | `'fallback'` | Strategy |
+| `fallback.maxRetries` | `number` | `1` | Retries per provider |
+| `fallback.circuitBreaker` | `CircuitBreakerConfig\|false` | enabled | Breaker config |
+| `cache` | `CacheConfig` | enabled | TTL cache |
+| `signal` | `AbortSignal` | — | Cancel entire search |
 
 ### `ReliableSearchResult`
 
 ```ts
 interface ReliableSearchResult {
   results: UnifiedSearchResult[];
-  provider: string;           // e.g. 'brave'
-  providerPath: string[];      // e.g. ['brave', 'tavily', 'duckduckgo']
-  fallbackReason?: string;     // e.g. 'brave: rate_limited'
-  attempts: Record<string, number>;
+  provider: string;              // provider that served the response
+  providerPath: string[];        // full call chain e.g. ['brave', 'tavily', 'ddg']
+  fallbackReason?: string;
+  attempts: AttemptRecord[];     // per-provider attempt diagnostics
   elapsedMs: number;
-}
-
-interface UnifiedSearchResult {
-  title: string;
-  url: string;
-  snippet: string;
-  provider: string;
-  publishedAt?: string;
+  retrievalSucceeded: boolean;   // did we get usable results?
+  usableForReview: boolean;      // are results ready for downstream consumption?
+  resultStatus: ResultStatus;    // 'success' | 'partial' | 'no_results' | 'failed' | 'aborted'
 }
 ```
 
-## Fallback Modes
+## Fallback modes
 
 | Mode | Behavior |
 |------|----------|
-| `sequential` (default) | Try one by one, stop on first success |
-| `parallel` | Fire all at once, return fastest |
-| `best-effort` | Fire all, merge all successful results |
+| `fallback` | Try providers in priority order, skip on empty/fail |
+| `race` | Fire all, first success wins, losers aborted via AbortController |
+| `aggregate` | Fire all, merge all successful results |
 
-```ts
-await reliableSearch('query', {
-  fallback: { mode: 'parallel' },
-});
-```
-
-## Providers
-
-| Provider | ID | Requires Key | Best For |
-|----------|----|-------------|----------|
-| DuckDuckGo | `duckduckgo` | No | Zero-config default |
-| Brave | `brave` | `BRAVE_API_KEY` | English web |
-| Bocha (博查) | `bocha` | `BOCHA_API_KEY` | Chinese web |
-| Metaso (秘塔) | `metaso` | `METASO_API_KEY` | Chinese AI search |
-| Tavily | `tavily` | `TAVILY_API_KEY` | AI / RAG |
-| Gemini | `gemini` | `GEMINI_API_KEY` | Google grounding |
-| SerpAPI | `serpapi` | `SERPAPI_API_KEY` | Multi-engine (Baidu, Google…) |
-| SearXNG | `searxng` | `SEARXNG_BASE_URL` | Self-hosted privacy |
-
-## Custom Providers
+## Custom providers
 
 ```ts
 import { registry } from 'reliable-web-search';
@@ -145,30 +125,30 @@ const myProvider: SearchProvider = {
   id: 'my-search',
   name: 'My Search Engine',
   requiresKey: true,
-  envVars: ['MY_SEARCH_API_KEY'],
-
-  async search(params) {
-    const key = process.env.MY_SEARCH_API_KEY;
-    const res = await fetch(`https://api.example.com/search?q=${params.query}`, {
-      headers: { Authorization: `Bearer ${key}` },
-    });
-    const data = await res.json();
-    return { results: data.items };
+  envVars: ['MY_API_KEY'],
+  priority: 15,
+  capabilities: {
+    fullWebSearch: true, aiGenerated: false,
+    maxResults: 20, freshnessSupport: false,
   },
-
-  normalize(raw, query) {
-    return raw.results.map(r => ({
-      title: r.title, url: r.url, snippet: r.desc, provider: 'my-search',
-    }));
+  async search(params) {
+    const key = process.env.MY_API_KEY;
+    // ... call your API, return { results: [...] }
+  },
+  normalize(raw) {
+    return raw.results.map(r => ({ ...r, provider: 'my-search' }));
   },
 };
 
 registry.register(myProvider);
 ```
 
-## Zero Runtime Dependencies
+## Architecture decisions
 
-`reliable-web-search` has **no runtime dependencies** — it uses only `fetch` (Node 18+ built-in). The package size is under 20 KB min+gzipped.
+- **Zero runtime dependencies** — uses only `fetch` (Node 18+)
+- **ESM + CJS dual output** — works with both `import` and `require`
+- **Provider factory pattern** — injectable API key resolver, fetch, and config (env vars are just the default)
+- **Typed ProviderError** — includes providerId, status code, retryability, and breaker impact
 
 ## License
 

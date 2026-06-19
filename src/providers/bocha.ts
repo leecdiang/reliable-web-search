@@ -18,12 +18,11 @@ import type {
 } from '../types.js';
 import { apiKeyMissing, apiKeyInvalid } from './shared.js';
 
-interface BochaWebResult {
+interface BochaWebPage {
   title: string;
   url: string;
   summary: string;
   sitename?: string;
-  /** ISO date string */
   date_last_crawled?: string;
 }
 
@@ -31,8 +30,10 @@ interface BochaWebResponse {
   code: number;
   message?: string;
   data?: {
-    results?: BochaWebResult[];
-    total_count?: number;
+    webPages?: {
+      value?: BochaWebPage[];
+      totalCount?: number;
+    };
   };
 }
 
@@ -47,6 +48,7 @@ export const bochaProvider: SearchProvider = {
     aiGenerated: false,
     maxResults: 50,
     freshnessSupport: false,
+    experimental: true,  // API contract not yet verified against real responses
   },
 
   async search(params: SearchParams): Promise<ProviderSearchResult> {
@@ -87,7 +89,7 @@ export const bochaProvider: SearchProvider = {
       throw new Error(`Bocha API error (code ${data.code}): ${data.message ?? 'unknown'}`);
     }
 
-    const bochaResults = data.data?.results ?? [];
+    const bochaResults = data.data?.webPages?.value ?? [];
     return {
       results: bochaResults.map((r) => ({
         title: r.title,
