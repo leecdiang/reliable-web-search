@@ -132,10 +132,10 @@ describe('REGRESSION: 401/403 should not retry or trip breaker', () => {
   });
   
   it('no_results should not trip circuit breaker', async () => {
-    // no_results is not an error, should not count as failure
     const { classifyError } = await import('../src/resilience/error-classify.js');
     const result = classifyError(new Error('no_results'), 'test');
-    assert.equal(result.category, 'unknown');
-    // After fix: should be 'no_results', should NOT affect breaker
+    assert.equal(result.category, 'no_results', 'empty results should be no_results category');
+    assert.equal(result.shouldBreakerTrip, false, 'empty results should NOT trip breaker');
+    assert.equal(result.retryable, false);
   });
 });

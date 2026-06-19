@@ -35,6 +35,13 @@ export const braveProvider: SearchProvider = {
   name: 'Brave Search',
   requiresKey: true,
   envVars: ['BRAVE_API_KEY'],
+  priority: 10,  // premium — full web search with free tier
+  capabilities: {
+    fullWebSearch: true,
+    aiGenerated: false,
+    maxResults: 20,
+    freshnessSupport: true,
+  },
 
   async search(params: SearchParams): Promise<ProviderSearchResult> {
     const apiKey = process.env.BRAVE_API_KEY;

@@ -35,6 +35,13 @@ export const duckduckgoProvider: SearchProvider = {
   name: 'DuckDuckGo',
   requiresKey: false,
   envVars: [],
+  priority: 100,  // last resort — Instant Answer API, not full web search
+  capabilities: {
+    fullWebSearch: false,
+    aiGenerated: false,
+    maxResults: 20,
+    freshnessSupport: false,
+  },
 
   async search(params: SearchParams): Promise<ProviderSearchResult> {
     const { query, country } = params;

@@ -32,6 +32,13 @@ export const metasoProvider: SearchProvider = {
   name: 'Metaso (秘塔)',
   requiresKey: true,
   envVars: ['METASO_API_KEY'],
+  priority: 15,  // premium — Chinese AI search
+  capabilities: {
+    fullWebSearch: false,
+    aiGenerated: true,
+    maxResults: 20,
+    freshnessSupport: false,
+  },
 
   async search(params: SearchParams): Promise<ProviderSearchResult> {
     const apiKey = process.env.METASO_API_KEY;

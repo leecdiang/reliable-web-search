@@ -41,6 +41,13 @@ export const bochaProvider: SearchProvider = {
   name: 'Bocha (博查)',
   requiresKey: true,
   envVars: ['BOCHA_API_KEY'],
+  priority: 12,  // premium — Chinese web search
+  capabilities: {
+    fullWebSearch: true,
+    aiGenerated: false,
+    maxResults: 50,
+    freshnessSupport: false,
+  },
 
   async search(params: SearchParams): Promise<ProviderSearchResult> {
     const apiKey = process.env.BOCHA_API_KEY;

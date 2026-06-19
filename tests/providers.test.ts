@@ -63,6 +63,16 @@ describe('Provider interface conformance', () => {
         }
       });
 
+      it('has a numeric priority', () => {
+        assert.equal(typeof p.priority, 'number');
+      });
+
+      it('has capabilities object', () => {
+        assert.equal(typeof p.capabilities, 'object');
+        assert.equal(typeof p.capabilities.fullWebSearch, 'boolean');
+        assert.equal(typeof p.capabilities.aiGenerated, 'boolean');
+      });
+
       it('has unique id', () => {
         const others = allProviders.filter((o) => o !== p);
         for (const o of others) {

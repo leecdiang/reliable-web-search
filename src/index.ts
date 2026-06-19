@@ -35,9 +35,11 @@ export type {
   ReliableSearchOptions,
   ReliableSearchResult,
   UnifiedSearchResult,
+  ResultStatus,
 
   // Provider contract (for custom providers)
   SearchProvider,
+  ProviderCapabilities,
   SearchParams,
   ProviderSearchResult,
   RawSearchItem,
@@ -52,7 +54,10 @@ export type {
   // Error system
   ErrorCategory,
   ClassifiedError,
+  ProviderError,
+  AttemptRecord,
 } from './types.js';
+export { createProviderError, isProviderError } from './types.js';
 
 // ── Provider Registry ─────────────────────────────────
 export { registry } from './providers/registry.js';

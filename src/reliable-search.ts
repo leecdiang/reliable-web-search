@@ -1,66 +1,19 @@
 /**
- * ============================================================
- *  reliable-search.ts — Main Orchestrator
- * ============================================================
- *  The public API entry point. Handles:
- *  - Provider resolution (explicit → env-var auto-detect → default)
- *  - Cache lookup/miss
- *  - Fallback chain execution
- *  - Result caching
+ * reliable-search.ts — Main Orchestrator (v0.1.1)
  */
-
-import type {
-  SearchProvider,
-  SearchParams,
-  ReliableSearchOptions,
-  ReliableSearchResult,
-  UnifiedSearchResult,
-} from './types.js';
+import type { SearchProvider, SearchParams, ReliableSearchOptions, ReliableSearchResult } from './types.js';
 import { registry } from './providers/registry.js';
 import { executeWithFallback } from './resilience/fallback-chain.js';
 import { SearchCache } from './cache.js';
 
-/** Shared global cache */
 let _cache: SearchCache | null = null;
+function cache(): SearchCache { if (!_cache) _cache = new SearchCache(); return _cache; }
 
-function cache(): SearchCache {
-  if (!_cache) _cache = new SearchCache();
-  return _cache;
-}
-
-/**
- * Perform a reliable web search with automatic provider fallback.
- *
- * ## Zero-config usage:
- * ```ts
- * const result = await reliableSearch('your query');
- * // Uses DuckDuckGo by default (no API key needed)
- * ```
- *
- * ## With API keys set as env vars:
- * ```bash
- * export BRAVE_API_KEY="xxx"
- * export BOCHA_API_KEY="yyy"
- * ```
- * ```ts
- * const result = await reliableSearch('your query');
- * // Auto-detects Brave → Bocha → DuckDuckGo
- * ```
- *
- * ## Explicit provider chain:
- * ```ts
- * const result = await reliableSearch('your query', {
- *   providers: ['gemini', 'tavily', 'duckduckgo'],
- * });
- * ```
- */
 export async function reliableSearch(
   query: string,
   options?: ReliableSearchOptions,
 ): Promise<ReliableSearchResult> {
-  // ── Cache check ─────────────────────────────────────
-  const cacheCfg = options?.cache;
-  const useCache = cacheCfg?.enabled !== false;
+  const useCache = options?.cache?.enabled !== false;
   if (useCache) {
     const key = SearchCache.key(query, {
       count: options?.count,
@@ -69,22 +22,23 @@ export async function reliableSearch(
       freshness: options?.freshness,
       providers: options?.providers?.join(','),
     });
-    const hit = options?.cache?.enabled !== false ? cache().get(key) : undefined;
+    const hit = cache().get(key);
     if (hit) {
       return {
         results: hit.results,
         provider: hit.provider,
         providerPath: hit.providerPath,
-        attempts: hit.attempts,
-        elapsedMs: 0, // cached
+        fallbackReason: undefined,
+        attempts: [],
+        elapsedMs: 0,
+        retrievalSucceeded: true,
+        usableForReview: hit.results.length > 0,
+        resultStatus: hit.results.length > 0 ? 'success' : 'no_results',
       };
     }
   }
 
-  // ── Resolve providers ───────────────────────────────
   const providers = resolveProviders(options);
-
-  // ── Build search params ─────────────────────────────
   const searchParams: SearchParams = {
     query: query.trim(),
     count: options?.count ?? 5,
@@ -94,7 +48,6 @@ export async function reliableSearch(
     signal: options?.signal,
   };
 
-  // ── Execute with fallback ───────────────────────────
   const raw = await executeWithFallback(providers, searchParams, options);
 
   const result: ReliableSearchResult = {
@@ -104,9 +57,11 @@ export async function reliableSearch(
     fallbackReason: raw.fallbackReason,
     attempts: raw.attempts,
     elapsedMs: raw.elapsedMs,
+    retrievalSucceeded: raw.retrievalSucceeded,
+    usableForReview: raw.usableForReview,
+    resultStatus: raw.resultStatus,
   };
 
-  // ── Cache store ─────────────────────────────────────
   if (useCache) {
     const key = SearchCache.key(query, {
       count: options?.count,
@@ -126,33 +81,32 @@ export async function reliableSearch(
   return result;
 }
 
-/**
- * Resolve the ordered list of providers to use.
- * Priority: explicit list → env-var auto-detect → all registered
- */
 function resolveProviders(options?: ReliableSearchOptions): SearchProvider[] {
   const all = registry.list();
 
   if (options?.providers && options.providers.length > 0) {
-    // Explicit provider list — look them up by id
-    const ordered = options.providers
+    const resolved = options.providers
       .map((id) => all.find((p) => p.id === id))
       .filter((p): p is SearchProvider => Boolean(p));
 
-    if (ordered.length === 0) {
-      throw new Error(
-        `No registered providers matched: [${options.providers.join(', ')}]. ` +
-        `Available: [${all.map((p) => p.id).join(', ')}]`
-      );
+    const requested = new Set(options.providers);
+    for (const id of options.providers) {
+      if (!all.some((p) => p.id === id)) {
+        const suggestions = registry.suggest(id);
+        const hint = suggestions.length > 0
+          ? ` Did you mean: ${suggestions.join(', ')}?`
+          : ` Available: [${all.map((p) => p.id).join(', ')}]`;
+        throw new Error(`Unknown provider "${id}".${hint}`);
+      }
     }
 
-    return ordered;
+    if (resolved.length === 0) {
+      throw new Error(`No registered providers matched. Available: [${all.map((p) => p.id).join(', ')}]`);
+    }
+    return resolved;
   }
 
-  // Auto-detect: providers with credentials → keyless providers
   const detected = registry.detect();
   if (detected.length > 0) return detected;
-
-  // Shouldn't happen if DuckDuckGo is registered, but be safe
   return all;
 }

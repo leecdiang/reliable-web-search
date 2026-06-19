@@ -6,13 +6,13 @@
  *  Used to avoid redundant API calls for identical queries.
  */
 
-import type { UnifiedSearchResult } from './types.js';
+import type { UnifiedSearchResult, AttemptRecord } from './types.js';
 
 interface CacheEntry {
   results: UnifiedSearchResult[];
   provider: string;
   providerPath: string[];
-  attempts: Record<string, number>;
+  attempts: AttemptRecord[];
   createdAt: number;
 }
 

@@ -1,262 +1,330 @@
 /**
- * ============================================================
- *  Fallback Chain — sequential provider failover executor
- * ============================================================
- *  Core resilience engine. Iterates through providers in
- *  priority order, applying circuit breaker checks, retries
- *  with exponential backoff, and error classification to
- *  decide when to fall through to the next provider.
+ * Fallback Chain — sequential provider failover executor (v0.1.1)
+ *
+ * Modes:
+ * - fallback (was 'sequential'): try providers in order, skip on no_results/fail
+ * - race (was 'parallel'): fire all, first success wins, cancel losers via AbortController
+ * - aggregate (was 'best-effort'): fire all, merge all successes
+ *
+ * Backward compat: 'sequential'→fallback, 'parallel'→race, 'best-effort'→aggregate
  */
 
-import {
-  type SearchProvider,
-  type SearchParams,
-  type ReliableSearchOptions,
-  type UnifiedSearchResult,
+import type {
+  SearchProvider, SearchParams, ReliableSearchOptions,
+  UnifiedSearchResult, AttemptRecord, ResultStatus,
 } from '../types.js';
+import { createProviderError } from '../types.js';
 import { classifyError } from './error-classify.js';
 import { BreakerRegistry, type BreakerOptions } from './circuit-breaker.js';
 
-/** Shared breaker registry across all searches */
 export const breakerRegistry = new BreakerRegistry();
 
-/**
- * Execute search with fallback across multiple providers.
- */
+type InternalResult = {
+  results: UnifiedSearchResult[];
+  provider: string;
+  providerPath: string[];
+  attempts: AttemptRecord[];
+  elapsedMs: number;
+  fallbackReason?: string;
+  resultStatus: ResultStatus;
+  retrievalSucceeded: boolean;
+  usableForReview: boolean;
+};
+
+// ─── Mode resolution (with backward compat) ──────────
+
+type Mode = 'fallback' | 'race' | 'aggregate';
+
+function resolveMode(opts?: ReliableSearchOptions): Mode {
+  const raw = opts?.fallback?.mode;
+  if (raw === 'race' || raw === 'aggregate' || raw === 'fallback') return raw;
+  // backward compat
+  if (raw === 'sequential') return 'fallback';
+  if (raw === 'parallel') return 'race';
+  if (raw === 'best-effort') return 'aggregate';
+  return 'fallback';
+}
+
+function shouldFallbackOn(status: ResultStatus, opts?: ReliableSearchOptions): boolean {
+  if (status === 'no_results' || status === 'failed' || status === 'aborted') return true;
+  if (status === 'partial') {
+    const fallbackOn = opts?.fallbackOn;
+    if (fallbackOn?.includes('partial')) return true;
+  }
+  return false;
+}
+
+// ─── Main Executor ───────────────────────────────────
+
 export async function executeWithFallback(
   providers: SearchProvider[],
   params: SearchParams,
   opts?: ReliableSearchOptions,
-): Promise<{
-  results: UnifiedSearchResult[];
-  provider: string;
-  providerPath: string[];
-  attempts: Record<string, number>;
-  elapsedMs: number;
-  fallbackReason?: string;
-}> {
+): Promise<InternalResult> {
+  const mode = resolveMode(opts);
+  if (mode === 'race') return executeRace(providers, params, opts);
+  if (mode === 'aggregate') return executeAggregate(providers, params, opts);
+  return executeFallback(providers, params, opts);
+}
+
+// ─── Fallback (sequential) ───────────────────────────
+
+async function executeFallback(
+  providers: SearchProvider[], params: SearchParams, opts?: ReliableSearchOptions,
+): Promise<InternalResult> {
   const startTime = Date.now();
   const providerPath: string[] = [];
-  const attempts: Record<string, number> = {};
+  const attempts: AttemptRecord[] = [];
   const maxRetries = opts?.fallback?.maxRetries ?? 1;
   const timeout = opts?.timeout ?? 15_000;
-  const breakerCfg = resolveBreakerConfig(opts?.fallback?.circuitBreaker);
-  const mode = opts?.fallback?.mode ?? 'sequential';
-
-  // Parallel mode: fire all at once
-  if (mode === 'parallel') {
-    return executeParallel(providers, params, opts, startTime);
-  }
-
-  // Best-effort mode: fire all, collect all successes
-  if (mode === 'best-effort') {
-    return executeBestEffort(providers, params, opts, startTime);
-  }
-
-  // Sequential mode (default): try one by one
-  let lastError: unknown;
-  let fallbackReason: string | undefined;
+  const breakerCfg = resolveBreakerConfig(opts);
+  const minResults = opts?.minResults ?? 1;
+  let lastErrorCode: string | undefined;
+  let lastHttpStatus: number | undefined;
 
   for (const provider of providers) {
     providerPath.push(provider.id);
 
-    // Circuit breaker check
     if (breakerCfg) {
       const breaker = breakerRegistry.get(provider.id);
       if (!breaker.allowRequest()) {
-        fallbackReason = `circuit breaker open for "${provider.id}"`;
+        const rec: AttemptRecord = {
+          providerId: provider.id, attempt: 1,
+          status: 'aborted', resultCount: 0,
+          elapsedMs: 0, errorCode: 'circuit_open',
+        };
+        attempts.push(rec);
         continue;
       }
     }
 
-    // Retry loop
     for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
-      attempts[provider.id] = attempt;
-
+      const t0 = Date.now();
       try {
-        const result = await withTimeout(
-          provider.search(params),
-          timeout,
-          `Search timed out after ${timeout}ms`,
-        );
-
-        // Success!
-        const classified = classifyError(result, provider.id);
-        if (classified.category === 'missing_credentials') {
-          // Provider returned a structured "no key" error
-          fallbackReason = `provider "${provider.id}" missing credentials`;
-          break; // skip to next provider
-        }
-
+        const result = await withTimeout(provider.search(params), timeout);
         const normalized = provider.normalize(result, params.query);
-        if (breakerCfg) {
-          breakerRegistry.get(provider.id).recordSuccess();
-        }
-        return {
-          results: normalized,
-          provider: provider.id,
-          providerPath,
-          attempts,
-          elapsedMs: Date.now() - startTime,
-          fallbackReason,
-        };
-      } catch (error) {
-        lastError = error;
-        const classified = classifyError(error, provider.id);
 
-        if (breakerCfg) {
+        // Empty results → treat as no_results, fall through
+        if (normalized.length === 0 || normalized.length < minResults) {
+          const status: ResultStatus = normalized.length === 0 ? 'no_results' : 'partial';
+          const rec: AttemptRecord = {
+            providerId: provider.id, attempt, status,
+            resultCount: normalized.length, elapsedMs: Date.now() - t0,
+          };
+          attempts.push(rec);
+
+          if (shouldFallbackOn(status, opts)) {
+            lastErrorCode = status;
+            break; // fall through to next provider
+          }
+          // partial but user opted not to fallback → accept
+          return buildResult(normalized, provider.id, providerPath, attempts, startTime, status);
+        }
+
+        // Success with results
+        if (breakerCfg) breakerRegistry.get(provider.id).recordSuccess();
+        const rec: AttemptRecord = {
+          providerId: provider.id, attempt, status: 'success',
+          resultCount: normalized.length, elapsedMs: Date.now() - t0,
+        };
+        attempts.push(rec);
+        return buildResult(normalized, provider.id, providerPath, attempts, startTime, 'success');
+      } catch (error) {
+        const classified = classifyError(error, provider.id);
+        const pe = createProviderError({
+          providerId: provider.id,
+          code: classified.category,
+          message: error instanceof Error ? error.message : String(error),
+          status: lastHttpStatus,
+          retryable: classified.retryable,
+          shouldBreakerTrip: classified.shouldBreakerTrip,
+        });
+
+        if (breakerCfg && classified.shouldBreakerTrip) {
           breakerRegistry.get(provider.id).recordFailure();
         }
 
-        // If not retryable or last attempt, fall through
-        if (!classified.retryable || attempt > maxRetries) {
-          fallbackReason = `${provider.id}: ${classified.category}`;
-          break;
-        }
+        lastErrorCode = classified.category;
+        const rec: AttemptRecord = {
+          providerId: provider.id, attempt, status: 'failed',
+          resultCount: 0, elapsedMs: Date.now() - t0,
+          errorCode: classified.category, httpStatus: lastHttpStatus,
+        };
+        attempts.push(rec);
 
-        // Wait with exponential backoff before retry
-        const delay = Math.min(2 ** attempt * 200, 5000);
-        await sleep(delay);
+        if (!classified.retryable || attempt > maxRetries) break;
+        await sleep(Math.min(2 ** attempt * 200, 5000));
       }
     }
   }
 
-  // All providers exhausted
-  const errMsg = lastError instanceof Error ? lastError.message : String(lastError ?? '');
-  throw new Error(
-    `All ${providers.length} search provider(s) exhausted. ` +
-    `Path: ${providerPath.join(' → ')}. ` +
-    `Last error: ${errMsg}`
-  );
+  throw createProviderError({
+    providerId: 'all',
+    code: 'all_exhausted',
+    message: `All ${providers.length} provider(s) exhausted. Path: ${providerPath.join(' → ')}. Last: ${lastErrorCode ?? 'unknown'}`,
+    status: lastHttpStatus,
+    retryable: false,
+    shouldBreakerTrip: false,
+  });
 }
 
-async function executeParallel(
-  providers: SearchProvider[],
-  params: SearchParams,
-  opts: ReliableSearchOptions | undefined,
-  startTime: number,
-): Promise<{
-  results: UnifiedSearchResult[];
-  provider: string;
-  providerPath: string[];
-  attempts: Record<string, number>;
-  elapsedMs: number;
-}> {
+// ─── Race (was 'parallel') — first wins, losers aborted ──
+
+async function executeRace(
+  providers: SearchProvider[], params: SearchParams, opts?: ReliableSearchOptions,
+): Promise<InternalResult> {
+  const startTime = Date.now();
   const timeout = opts?.timeout ?? 15_000;
-  const attempts: Record<string, number> = {};
+  const attempts: AttemptRecord[] = [];
+  const providerPath = providers.map((p) => p.id);
+
+  const controller = new AbortController();
+  const linkSignal = (signal?: AbortSignal) => {
+    if (signal) signal.addEventListener('abort', () => controller.abort(signal.reason));
+  };
+  linkSignal(params.signal);
 
   const promises = providers.map(async (provider) => {
-    attempts[provider.id] = 1;
+    const t0 = Date.now();
+    const providerSignal = controller.signal;
     try {
       const result = await withTimeout(
-        provider.search(params),
+        provider.search({ ...params, signal: providerSignal }),
         timeout,
-        `Search timed out after ${timeout}ms`,
       );
-      return {
-        provider,
-        results: provider.normalize(result, params.query),
+      const normalized = provider.normalize(result, params.query);
+      if (normalized.length > 0) {
+        // Cancel losers
+        controller.abort(`won by ${provider.id}`);
+        const rec: AttemptRecord = {
+          providerId: provider.id, attempt: 1, status: 'success',
+          resultCount: normalized.length, elapsedMs: Date.now() - t0,
+        };
+        attempts.push(rec);
+        return { winner: true, results: normalized, provider: provider.id };
+      }
+      const rec: AttemptRecord = {
+        providerId: provider.id, attempt: 1, status: 'no_results',
+        resultCount: 0, elapsedMs: Date.now() - t0,
       };
-    } catch {
-      return null;
+      attempts.push(rec);
+      return { winner: false, results: [], provider: provider.id };
+    } catch (error) {
+      const isAbort = (error instanceof DOMException && error.name === 'AbortError') ||
+        (error instanceof Error && error.message?.includes('Aborted'));
+      const classified = classifyError(error, provider.id);
+      const rec: AttemptRecord = {
+        providerId: provider.id, attempt: 1,
+        status: isAbort ? 'aborted' : 'failed',
+        resultCount: 0, elapsedMs: Date.now() - t0,
+        errorCode: isAbort ? 'cancelled' : classified.category,
+      };
+      attempts.push(rec);
+      return { winner: false, results: [], provider: provider.id };
     }
   });
 
-  // Return first success
-  const results = await Promise.all(promises);
-  for (const r of results) {
-    if (r) {
-      return {
-        results: r.results,
-        provider: r.provider.id,
-        providerPath: providers.map((p) => p.id),
-        attempts,
-        elapsedMs: Date.now() - startTime,
-      };
-    }
+  // Promise.any: first success wins
+  const winner = await Promise.any(
+    promises.map(async (p) => {
+      const r = await p;
+      if (r.winner) return r;
+      throw new Error(`provider ${r.provider} did not win`);
+    })
+  ).catch(() => null);
+
+  if (winner && winner.results.length > 0) {
+    return buildResult(winner.results, winner.provider, providerPath, attempts, startTime, 'success');
   }
 
-  throw new Error(
-    `All ${providers.length} search provider(s) failed in parallel mode.`
-  );
+  throw createProviderError({
+    providerId: 'all', code: 'all_exhausted',
+    message: `All ${providers.length} provider(s) failed in race mode.`,
+    retryable: false, shouldBreakerTrip: false,
+  });
 }
 
-async function executeBestEffort(
-  providers: SearchProvider[],
-  params: SearchParams,
-  opts: ReliableSearchOptions | undefined,
-  startTime: number,
-): Promise<{
-  results: UnifiedSearchResult[];
-  provider: string;
-  providerPath: string[];
-  attempts: Record<string, number>;
-  elapsedMs: number;
-}> {
+// ─── Aggregate (was 'best-effort') — merge all ────────
+
+async function executeAggregate(
+  providers: SearchProvider[], params: SearchParams, opts?: ReliableSearchOptions,
+): Promise<InternalResult> {
+  const startTime = Date.now();
   const timeout = opts?.timeout ?? 15_000;
-  const attempts: Record<string, number> = {};
+  const attempts: AttemptRecord[] = [];
   const allResults: UnifiedSearchResult[] = [];
   const successful: string[] = [];
 
-  const promises = providers.map(async (provider) => {
-    attempts[provider.id] = 1;
+  await Promise.all(providers.map(async (provider) => {
+    const t0 = Date.now();
     try {
-      const result = await withTimeout(
-        provider.search(params),
-        timeout,
-        `Search timed out after ${timeout}ms`,
-      );
+      const result = await withTimeout(provider.search(params), timeout);
       const normalized = provider.normalize(result, params.query);
       allResults.push(...normalized);
       successful.push(provider.id);
-    } catch {
-      // best-effort: ignore failures
+      const rec: AttemptRecord = {
+        providerId: provider.id, attempt: 1, status: normalized.length > 0 ? 'success' : 'no_results',
+        resultCount: normalized.length, elapsedMs: Date.now() - t0,
+      };
+      attempts.push(rec);
+    } catch (error) {
+      const classified = classifyError(error, provider.id);
+      const rec: AttemptRecord = {
+        providerId: provider.id, attempt: 1, status: 'failed',
+        resultCount: 0, elapsedMs: Date.now() - t0,
+        errorCode: classified.category,
+      };
+      attempts.push(rec);
     }
-  });
-
-  await Promise.all(promises);
+  }));
 
   if (allResults.length === 0) {
-    throw new Error(
-      `All ${providers.length} search provider(s) failed in best-effort mode.`
-    );
+    throw createProviderError({
+      providerId: 'all', code: 'all_exhausted',
+      message: `All ${providers.length} provider(s) failed in aggregate mode.`,
+      retryable: false, shouldBreakerTrip: false,
+    });
   }
 
+  return buildResult(
+    allResults,
+    successful.join('+'),
+    providers.map((p) => p.id),
+    attempts, startTime,
+    successful.length < providers.length ? 'partial' : 'success',
+  );
+}
+
+// ─── Helpers ──────────────────────────────────────────
+
+function buildResult(
+  results: UnifiedSearchResult[], provider: string,
+  providerPath: string[], attempts: AttemptRecord[],
+  startTime: number, resultStatus: ResultStatus,
+): InternalResult {
   return {
-    results: allResults,
-    provider: successful.join('+'),
-    providerPath: providers.map((p) => p.id),
-    attempts,
+    results, provider, providerPath, attempts,
     elapsedMs: Date.now() - startTime,
+    resultStatus,
+    retrievalSucceeded: resultStatus === 'success' || resultStatus === 'partial',
+    usableForReview: results.length > 0,
   };
 }
 
-// ─── Helpers ────────────────────────────────────────────────
-
-function resolveBreakerConfig(
-  cfg: NonNullable<ReliableSearchOptions['fallback']>['circuitBreaker'],
-): Partial<BreakerOptions> | false {
+function resolveBreakerConfig(opts?: ReliableSearchOptions): Partial<BreakerOptions> | false {
+  const cfg = opts?.fallback?.circuitBreaker;
   if (cfg === false) return false;
-  return cfg ?? {}; // default: enabled with defaults
+  return cfg ?? {};
 }
 
-async function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  errorMessage: string,
-): Promise<T> {
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   if (!timeoutMs || timeoutMs <= 0) return promise;
-
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
+    timer = setTimeout(() => reject(new Error(`Search timed out after ${timeoutMs}ms`)), timeoutMs);
   });
-
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
+  try { return await Promise.race([promise, timeoutPromise]); }
+  finally { if (timer) clearTimeout(timer); }
 }
 
 function sleep(ms: number): Promise<void> {

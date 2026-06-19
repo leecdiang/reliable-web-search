@@ -1,77 +1,80 @@
 /**
- * ============================================================
- *  Error Classifier — decides retry/fallback behavior
- * ============================================================
- *  Classifies provider errors into categories that drive
- *  the fallback chain's decisions:
- *  - Should we retry this provider?
- *  - Should we fall through to the next one?
+ * Error Classifier — decides retry/fallback/breaker behavior.
+ * Updated to handle ProviderError and no_results.
  */
-
 import type { ClassifiedError, ErrorCategory } from '../types.js';
+import { isProviderError } from '../types.js';
 
-/**
- * Classify a thrown error from a provider.
- * Uses heuristics on error message + HTTP status codes to
- * decide the category and fallback behavior.
- */
-export function classifyError(
-  error: unknown,
-  providerId: string,
-): ClassifiedError {
+export function classifyError(error: unknown, _providerId?: string): ClassifiedError {
+  // Structured ProviderError — use its metadata directly
+  if (isProviderError(error)) {
+    const cat: ErrorCategory =
+      error.code === 'no_results' ? 'no_results' :
+      error.code === 'missing_credentials' ? 'missing_credentials' :
+      error.code === 'auth_failed' ? 'auth_failed' :
+      error.code === 'rate_limited' ? 'rate_limited' :
+      error.code === 'timeout' ? 'timeout' :
+      error.status && error.status >= 500 ? 'server_error' :
+      error.code === 'network_error' ? 'network_error' :
+      error.code === 'parse_error' ? 'parse_error' :
+      'unknown';
+    return {
+      category: cat,
+      retryable: error.retryable,
+      shouldFallback: true,
+      shouldBreakerTrip: error.shouldBreakerTrip,
+      original: error,
+    };
+  }
+
   const message = extractMessage(error);
   const status = extractStatus(error);
 
-  // Missing credentials — don't count as failure, just skip
+  // Missing credentials
   if (/missing.api.?key|no.api.?key|api.?key.*(required|missing|not.?set)/i.test(message)) {
-    return classify('missing_credentials', false, true, error);
+    return c('missing_credentials', false, true, false, error);
   }
-
-  // Auth failed (wrong key) — skip, don't retry
+  // Auth failed (401/403)
   if (status === 401 || status === 403 ||
       /unauthorized|forbidden|invalid.*(api.?key|token|auth)/i.test(message)) {
-    return classify('auth_failed', false, true, error);
+    return c('auth_failed', false, true, false, error);
   }
-
-  // Rate limited — retry with backoff, fall through if exhausted
+  // Rate limited — retryable
   if (status === 429 || /rate.?limit|too.?many.?requests/i.test(message)) {
-    return classify('rate_limited', true, true, error);
+    return c('rate_limited', true, true, true, error);
   }
-
-  // Timeout — retry once
+  // Timeout — retryable
   if (
-    error instanceof DOMException && error.name === 'AbortError' ||
+    (typeof DOMException !== 'undefined' && error instanceof DOMException && error.name === 'AbortError') ||
     /timeout|timed.?out/i.test(message)
   ) {
-    return classify('timeout', true, true, error);
+    return c('timeout', true, true, true, error);
   }
-
-  // Server errors (5xx) — retry, fall through if exhausted
+  // Server errors (5xx) — retryable
   if (status !== undefined && status >= 500 && status < 600) {
-    return classify('server_error', true, true, error);
+    return c('server_error', true, true, true, error);
   }
-
-  // Network errors — retry
+  // Network errors — retryable
   if (/fetch.?fail|network.?error|econnrefused|enotfound/i.test(message)) {
-    return classify('network_error', true, true, error);
+    return c('network_error', true, true, true, error);
   }
-
-  // Parse errors — skip (provider response format changed?)
+  // No results — NOT an error, should fallback
+  if (/no.?results/i.test(message)) {
+    return c('no_results', false, true, false, error);
+  }
+  // Parse errors
   if (/parse|json|syntax|unexpected.?token/i.test(message)) {
-    return classify('parse_error', false, true, error);
+    return c('parse_error', false, true, false, error);
   }
-
-  // Unknown — skip for safety
-  return classify('unknown', false, true, error);
+  return c('unknown', false, true, false, error);
 }
 
-function classify(
-  category: ErrorCategory,
-  retryable: boolean,
-  shouldFallback: boolean,
+function c(
+  category: ErrorCategory, retryable: boolean,
+  shouldFallback: boolean, shouldBreakerTrip: boolean,
   original: unknown,
 ): ClassifiedError {
-  return { category, retryable, shouldFallback, original };
+  return { category, retryable, shouldFallback, shouldBreakerTrip, original };
 }
 
 function extractMessage(error: unknown): string {

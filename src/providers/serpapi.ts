@@ -38,6 +38,13 @@ export const serpapiProvider: SearchProvider = {
   name: 'SerpAPI',
   requiresKey: true,
   envVars: ['SERPAPI_API_KEY'],
+  priority: 30,  // paid only, advanced users
+  capabilities: {
+    fullWebSearch: true,
+    aiGenerated: false,
+    maxResults: 100,
+    freshnessSupport: false,
+  },
 
   async search(params: SearchParams): Promise<ProviderSearchResult> {
     const apiKey = process.env.SERPAPI_API_KEY;

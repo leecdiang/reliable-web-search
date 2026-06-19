@@ -41,6 +41,13 @@ export const geminiProvider: SearchProvider = {
   name: 'Gemini (Google)',
   requiresKey: true,
   envVars: ['GEMINI_API_KEY'],
+  priority: 20,  // AI-synthesized answers, not traditional search
+  capabilities: {
+    fullWebSearch: false,
+    aiGenerated: true,
+    maxResults: 20,
+    freshnessSupport: true,
+  },
 
   async search(params: SearchParams): Promise<ProviderSearchResult> {
     const apiKey = process.env.GEMINI_API_KEY;

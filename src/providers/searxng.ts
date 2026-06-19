@@ -41,6 +41,16 @@ export const searxngProvider: SearchProvider = {
   // The envVar is a config URL, not an API key.
   requiresKey: false,
   envVars: ['SEARXNG_BASE_URL'],
+  priority: 50,  // self-hosted, medium priority
+  capabilities: {
+    fullWebSearch: true,
+    aiGenerated: false,
+    maxResults: 30,
+    freshnessSupport: true,
+  },
+  isConfigured(): boolean {
+    return typeof process.env.SEARXNG_BASE_URL === 'string' && process.env.SEARXNG_BASE_URL!.trim().length > 0;
+  },
 
   async search(params: SearchParams): Promise<ProviderSearchResult> {
     const baseUrl = process.env.SEARXNG_BASE_URL || 'http://localhost:8080';

@@ -1,48 +1,82 @@
 /**
  * ============================================================
- *  reliable-web-search — Core Types
+ *  reliable-web-search — Core Types (v0.1.1)
  * ============================================================
- *  All public types for the package.
- *  Provider authors: implement {@link SearchProvider} to add a new engine.
  */
 
 // ─── Unified Result ────────────────────────────────────────
 
 export interface UnifiedSearchResult {
-  /** Result title */
   title: string;
-  /** Result URL */
   url: string;
-  /** Content snippet */
   snippet: string;
-  /** Source provider id */
   provider: string;
-  /** ISO-8601 publish date (if available) */
   publishedAt?: string;
-  /** Provider-specific raw data (opt-in for advanced users) */
   raw?: unknown;
+}
+
+// ─── Result Status ─────────────────────────────────────────
+
+export type ResultStatus =
+  | 'success'       // provider returned usable results
+  | 'partial'       // provider returned some results but below quality threshold
+  | 'no_results'    // provider returned zero results (should trigger fallback)
+  | 'failed'        // provider threw an error
+  | 'aborted';      // request was cancelled (timeout, user AbortSignal, etc.)
+
+// ─── Provider Error (structured) ───────────────────────────
+
+export interface ProviderError extends Error {
+  name: 'ProviderError';
+  providerId: string;
+  code: string;
+  status?: number;          // HTTP status if applicable
+  statusText?: string;
+  retryable: boolean;
+  shouldBreakerTrip: boolean;
+  retryAfter?: number;      // seconds, from Retry-After header
+  cause?: unknown;
+}
+
+export function isProviderError(e: unknown): e is ProviderError {
+  return e instanceof Error && (e as ProviderError).name === 'ProviderError';
+}
+
+export function createProviderError(opts: {
+  providerId: string;
+  code: string;
+  message: string;
+  status?: number;
+  retryable?: boolean;
+  shouldBreakerTrip?: boolean;
+  retryAfter?: number;
+  cause?: unknown;
+}): ProviderError {
+  const err = new Error(opts.message) as ProviderError;
+  err.name = 'ProviderError';
+  err.providerId = opts.providerId;
+  err.code = opts.code;
+  err.status = opts.status;
+  err.retryable = opts.retryable ?? false;
+  err.shouldBreakerTrip = opts.shouldBreakerTrip ?? true;
+  err.retryAfter = opts.retryAfter;
+  err.cause = opts.cause;
+  return err;
 }
 
 // ─── Provider Interface ────────────────────────────────────
 
 export interface SearchParams {
-  /** Search query string */
   query: string;
-  /** Desired result count (1–20) */
   count: number;
-  /** ISO 3166-1 alpha-2 country code */
   country?: string;
-  /** ISO 639-1 language code */
   language?: string;
-  /** Time filter */
   freshness?: SearchFreshness;
-  /** AbortSignal for cancellation */
   signal?: AbortSignal;
 }
 
 export type SearchFreshness = 'day' | 'week' | 'month' | 'year';
 
-/** Raw result from a provider, before normalization */
 export interface ProviderSearchResult {
   results: RawSearchItem[];
 }
@@ -55,31 +89,37 @@ export interface RawSearchItem {
 }
 
 /**
- * Every search provider must implement this interface.
- *
- * ## Quick start for new providers
- * 1. Copy `src/providers/duckduckgo.ts` as a template
- * 2. Implement `search()` and `normalize()`
- * 3. Call `registerProvider()` in your entry point
- * 4. Send a PR!
+ * Capabilities that a provider declares, used to rank providers
+ * during auto-detection and to decide fallback strategy.
  */
+export interface ProviderCapabilities {
+  /** Whether this provider does full web search (not just instant answers) */
+  fullWebSearch: boolean;
+  /** Whether this provider returns AI-synthesized answers vs raw web results */
+  aiGenerated: boolean;
+  /** Max results this provider can return per call */
+  maxResults: number;
+  /** Supported freshness/date filters */
+  freshnessSupport: boolean;
+}
+
 export interface SearchProvider {
-  /** Unique identifier, e.g. `'brave'`, `'bocha'` */
   readonly id: string;
-  /** Human-readable name, e.g. `'Brave Search'` */
   readonly name: string;
-  /** Whether this provider requires an API key */
   readonly requiresKey: boolean;
-  /**
-   * Environment variable names to auto-detect credentials.
-   * Listed in priority order. First one found wins.
-   */
   readonly envVars: readonly string[];
-  /** Quick health check (optional). Called before fallback decisions. */
+  /**
+   * Priority for auto-detection ordering. Lower = tried first.
+   * Defaults: 10 (keyed, full web search), 50 (keyed, AI search),
+   * 90 (keyless), 100 (DuckDuckGo last resort)
+   */
+  readonly priority: number;
+  /** Declared capabilities used for ranking and quality decisions */
+  readonly capabilities: ProviderCapabilities;
+  /** Quick check: is this provider currently configured/usable? */
+  isConfigured?(): boolean;
   healthCheck?(): Promise<HealthStatus>;
-  /** Execute a search. Throws on failure. */
   search(params: SearchParams): Promise<ProviderSearchResult>;
-  /** Normalize raw provider result into the unified format */
   normalize(raw: ProviderSearchResult, query: string): UnifiedSearchResult[];
 }
 
@@ -88,91 +128,67 @@ export type HealthStatus = 'healthy' | 'degraded' | 'unhealthy' | 'unknown';
 // ─── Main API Options ──────────────────────────────────────
 
 export interface ReliableSearchOptions {
-  /**
-   * Ordered provider priority list.
-   * If omitted, auto-detects from environment variables + built-in defaults.
-   */
   providers?: string[];
-
-  /** Max results to return (1–20, default 5) */
   count?: number;
-
-  /** ISO 3166-1 alpha-2 country filter */
   country?: string;
-
-  /** ISO 639-1 language filter */
   language?: string;
-
-  /** Time freshness filter */
   freshness?: SearchFreshness;
-
-  // ─── Resilience Config ──────────────────────────────────
-
-  /** Fallback strategy configuration */
   fallback?: FallbackConfig;
-
-  /** Result cache configuration */
   cache?: CacheConfig;
-
-  /** Per-provider timeout in ms (default 15000) */
   timeout?: number;
-
-  /** AbortSignal for cancellation of the entire search */
   signal?: AbortSignal;
+  /** Minimum results to consider a provider "successful". Default 1. */
+  minResults?: number;
+  /** Fallback policies: which result states trigger fallthrough */
+  fallbackOn?: ResultStatus[];
 }
 
 export interface FallbackConfig {
-  /**
-   * Fallback mode:
-   * - `'sequential'` (default): try providers in order, stop on first success
-   * - `'parallel'`: query all at once, return fastest success
-   * - `'best-effort'`: query all, merge all successful results
-   */
-  mode?: 'sequential' | 'parallel' | 'best-effort';
-
-  /** Max retries per provider (default 1) */
+  mode?: 'fallback' | 'race' | 'aggregate';
+  /** @deprecated kept for backward compat, use mode: 'fallback' */
+  sequential?: never;
+  /** @deprecated kept for backward compat, use mode: 'race' */
+  parallel?: never;
+  /** @deprecated kept for backward compat, use mode: 'aggregate' */
+  'best-effort'?: never;
   maxRetries?: number;
-
-  /** Circuit breaker config (default enabled) */
   circuitBreaker?: CircuitBreakerConfig | false;
 }
 
 export interface CircuitBreakerConfig {
-  /** Consecutive failures to trip (default 3) */
   failureThreshold?: number;
-  /** Recovery timeout ms before half-open (default 60000) */
   recoveryTimeout?: number;
-  /** Max trial requests in half-open state (default 1) */
   halfOpenMaxRequests?: number;
 }
 
 export interface CacheConfig {
-  /** Enable result caching (default true) */
   enabled?: boolean;
-  /** Cache TTL in ms (default 900000 = 15 min) */
   ttl?: number;
-  /** Max cache entries (default 500) */
   maxSize?: number;
 }
 
 // ─── Main API Result ───────────────────────────────────────
 
 export interface ReliableSearchResult {
-  /** Normalized search results */
   results: UnifiedSearchResult[];
-  /** Provider that ultimately served the response */
   provider: string;
-  /**
-   * Full provider call chain for debugging.
-   * e.g. `['gemini', 'tavily', 'duckduckgo']` means Gemini failed, Tavily failed, DDG succeeded.
-   */
   providerPath: string[];
-  /** Why the primary provider wasn't used (if applicable) */
   fallbackReason?: string;
-  /** Attempt counts per provider */
-  attempts: Record<string, number>;
-  /** Total elapsed ms */
+  attempts: AttemptRecord[];
   elapsedMs: number;
+  retrievalSucceeded: boolean;
+  usableForReview: boolean;
+  resultStatus: ResultStatus;
+}
+
+export interface AttemptRecord {
+  providerId: string;
+  attempt: number;
+  status: ResultStatus;
+  resultCount: number;
+  elapsedMs: number;
+  errorCode?: string;
+  httpStatus?: number;
 }
 
 // ─── Error Categories ──────────────────────────────────────
@@ -185,15 +201,14 @@ export type ErrorCategory =
   | 'server_error'
   | 'network_error'
   | 'parse_error'
+  | 'no_results'
   | 'unknown';
 
 export interface ClassifiedError {
   category: ErrorCategory;
-  /** Whether this error is worth retrying */
   retryable: boolean;
-  /** Whether to fall through to the next provider */
   shouldFallback: boolean;
-  /** Original error for logging */
+  shouldBreakerTrip: boolean;
   original: unknown;
 }
 
@@ -204,6 +219,7 @@ export interface ProviderRegistry {
   unregister(id: string): boolean;
   get(id: string): SearchProvider | undefined;
   list(): SearchProvider[];
-  /** Auto-detect providers with available credentials from env vars */
   detect(): SearchProvider[];
+  /** Suggest corrections for a misspelled provider id */
+  suggest(candidate: string): string[];
 }

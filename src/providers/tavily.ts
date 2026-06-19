@@ -36,6 +36,13 @@ export const tavilyProvider: SearchProvider = {
   name: 'Tavily',
   requiresKey: true,
   envVars: ['TAVILY_API_KEY'],
+  priority: 11,  // premium — AI-optimized web search
+  capabilities: {
+    fullWebSearch: true,
+    aiGenerated: false,
+    maxResults: 20,
+    freshnessSupport: false,
+  },
 
   async search(params: SearchParams): Promise<ProviderSearchResult> {
     const apiKey = process.env.TAVILY_API_KEY;
