@@ -2,9 +2,9 @@
 
 **Multi-provider web search with automatic fallback, circuit breaking, and zero-config defaults.**
 
-[![npm version](https://img.shields.io/npm/v/reliable-web-search)](https://www.npmjs.com/package/reliable-web-search)
-[![license](https://img.shields.io/npm/l/reliable-web-search)](LICENSE)
-[![node](https://img.shields.io/node/v/reliable-web-search)](package.json)
+[![version](https://img.shields.io/badge/version-v0.1.0-blue)](https://github.com/leecdiang/reliable-web-search/releases)
+[![license](https://img.shields.io/github/license/leecdiang/reliable-web-search)](LICENSE)
+[![node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](package.json)
 
 ---
 
