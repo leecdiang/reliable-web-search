@@ -13,6 +13,26 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// ── Auto-register providers (CLI entry doesn't go through index.ts) ─
+import { registry } from './providers/registry.js';
+import { duckduckgoProvider } from './providers/duckduckgo.js';
+import { braveProvider } from './providers/brave.js';
+import { bochaProvider } from './providers/bocha.js';
+import { metasoProvider } from './providers/metaso.js';
+import { tavilyProvider } from './providers/tavily.js';
+import { geminiProvider } from './providers/gemini.js';
+import { serpapiProvider } from './providers/serpapi.js';
+import { searxngProvider } from './providers/searxng.js';
+
+registry.register(duckduckgoProvider);
+registry.register(braveProvider);
+registry.register(bochaProvider);
+registry.register(metasoProvider);
+registry.register(tavilyProvider);
+registry.register(geminiProvider);
+registry.register(serpapiProvider);
+registry.register(searxngProvider);
+
 // ── MCP server (loaded lazily) ────────────────────────
 let mcpServerMain: (() => Promise<void>) | null = null;
 
