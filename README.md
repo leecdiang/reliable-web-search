@@ -1,6 +1,6 @@
 # reliable-web-search
 
-**Policy-driven multi-provider web search runtime for AI agents and resilient applications.**
+**Multi-provider web search with automatic fallback, circuit breaking, and unified agent setup.**
 
 [![version](https://img.shields.io/github/v/release/leecdiang/reliable-web-search)](https://github.com/leecdiang/reliable-web-search/releases)
 [![license](https://img.shields.io/github/license/leecdiang/reliable-web-search)](LICENSE)
@@ -8,38 +8,44 @@
 
 ---
 
-## What it is
+## Install
 
-Every web search API fails — rate limits, auth expiry, network hiccups. `reliable-web-search` is a **routing and resilience layer** that sits between your app and multiple search providers. It handles provider selection, failover, result validation, and cancellation so you don't have to.
+```bash
+npm install --global reliable-web-search
+rws
+```
 
-**This is not a "search everything" aggregator.** It's a policy engine: you define which providers to try, in what order, what counts as success, and what triggers fallback.
+The setup wizard will:
 
-## Core capabilities
+1. Help you choose a search provider (Brave, Tavily, Gemini, DuckDuckGo, SerpAPI, SearXNG, Bocha, Metaso)
+2. Prompt for an API key (hidden input, never echoed)
+3. Verify the connection with a small test search
+4. Detect OpenClaw, Codex, and Claude Code on your machine
+5. Install the same `reliable_web_search` MCP tool in the selected agents
 
-- **Provider routing** — auto-detects available providers from env vars, falls back in priority order
-- **Quality gates** — empty results trigger fallthrough; configurable minimum result thresholds
-- **Real cancellation** — race mode aborts losers via per-provider AbortController; timeout truly aborts stuck requests
-- **Circuit breaker** — isolates failing providers with three-state health tracking
-- **Structured diagnostics** — every attempt logged with provider, status, timing, and error classification
+After setup:
 
-## Providers
+```bash
+rws "latest RISC-V news"
+```
 
-| Provider | ID | Priority | Type | Status |
-|----------|----|----------|------|--------|
-| Brave | `brave` | 10 | Full web search | ✅ Verified |
-| Tavily | `tavily` | 11 | Full web search | ✅ Verified |
-| Bocha (博查) | `bocha` | 12 | Full web search | ⚠️ Experimental |
-| Metaso (秘塔) | `metaso` | 15 | AI search | ⚠️ Experimental |
-| Gemini | `gemini` | 20 | AI grounding | ✅ Verified |
-| SerpAPI | `serpapi` | 30 | Multi-engine | ✅ Verified |
-| SearXNG | `searxng` | 50 | Self-hosted | ✅ Verified |
-| DuckDuckGo | `duckduckgo` | 100 | Instant Answer* | ✅ Verified |
+### Other commands
 
-**\*DuckDuckGo uses the Instant Answer API, not full web search.** It returns encyclopedia-style topic summaries, not a comprehensive web results page. It is a lowest-priority fallback — useful for zero-config prototyping, not production search.
+```bash
+rws doctor        # Health check: Node.js, config, credentials, providers, agents
+rws setup         # Re-run the unified setup wizard
+rws connect       # Connect to detected agent hosts (or specific: openclaw, codex, claude-code, generic)
+rws disconnect    # Remove MCP registrations (provider credentials stay safe)
+```
 
-Providers marked **Experimental** have API contracts that need verification against real responses. They are included in the package but may produce parse errors.
+Agent integrations:
 
-## Quick Start
+- **OpenClaw** — automatically detected and configured via `openclaw mcp`
+- **Codex** — automatically detected and configured via `codex mcp`
+- **Claude Code** — automatically detected and configured via `claude mcp`
+- **Other MCP clients** — compatible through standard MCP config (`rws mcp`)
+
+## Quick Start (SDK)
 
 ```bash
 npm install reliable-web-search
@@ -48,7 +54,7 @@ npm install reliable-web-search
 ```ts
 import { reliableSearch } from 'reliable-web-search';
 
-// Zero config uses DuckDuckGo Instant Answer (limited, but no key needed)
+// Zero config uses DuckDuckGo Instant Answer (limited, no key needed)
 const result = await reliableSearch('RISC-V vector extension');
 
 console.log(result.provider);      // 'duckduckgo'
@@ -59,62 +65,108 @@ console.log(result.results);
 ```bash
 # Set API keys for better results — auto-detected in priority order
 export BRAVE_API_KEY="***"       # https://brave.com/search/api/
-export BOCHA_API_KEY="***"       # https://open.bochaai.com
 export TAVILY_API_KEY="***"      # https://tavily.com
 export GEMINI_API_KEY="***"      # https://aistudio.google.com/apikey
 export SEARXNG_BASE_URL="https://your-instance.example.com"
 ```
 
+## Providers
+
+| Provider        | ID           | Requires Key | Type             | Status         |
+|-----------------|--------------|-------------|-------------------|----------------|
+| Brave           | `brave`      | Yes         | Full web search   | ✅ Verified     |
+| Tavily          | `tavily`     | Yes         | AI-optimized      | ✅ Verified     |
+| Gemini          | `gemini`     | Yes         | Grounded AI       | ✅ Verified     |
+| SerpAPI         | `serpapi`    | Yes         | Multi-engine      | ✅ Verified     |
+| DuckDuckGo      | `duckduckgo` | No          | Instant Answer*   | ✅ Verified     |
+| SearXNG         | `searxng`    | Config      | Self-hosted       | ✅ Verified     |
+| Bocha (博查)    | `bocha`      | Yes         | Full web search   | ⚠️ Experimental |
+| Metaso (秘塔)   | `metaso`     | Yes         | AI search         | ⚠️ Experimental |
+
+**\*DuckDuckGo uses the Instant Answer API, not full web search.** It returns encyclopedia-style topic summaries, not a comprehensive web results page. It is a lowest-priority fallback — useful for zero-config prototyping, not production search.
+
+## MCP Tool — `reliable_web_search`
+
+The MCP server exposes a single tool for AI agents:
+
 ```ts
-// Same code, now auto-uses Brave → Tavily → DDG based on what's configured
-const result = await reliableSearch('quantum computing');
+// Tool input schema
+{
+  query: string;                                          // required
+  count?: number;                                         // 1–20
+  strategy?: 'fallback' | 'race' | 'aggregate';
+  providers?: string[];
+  freshness?: 'day' | 'week' | 'month' | 'year';
+}
 ```
+
+The tool description tells agents:
+
+> Use this tool for current or externally verifiable information. A failed retrieval is not evidence that a claim is false. Only treat results as reviewable when `usableForReview` is true.
 
 ## API
 
 ### `reliableSearch(query, options?)`
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `query` | `string` | *(required)* | Search query |
-| `providers` | `string[]` | auto-detect | Provider priority list by id |
-| `count` | `number` | `5` | Results to return (1–20) |
-| `country` | `string` | — | ISO 3166-1 alpha-2 |
-| `language` | `string` | — | ISO 639-1 |
-| `freshness` | `'day'\|'week'\|'month'\|'year'` | — | Time filter |
-| `timeout` | `number` | `15000` | Per-provider timeout (ms) |
-| `minResults` | `number` | `1` | Minimum results to count as success |
-| `fallback.mode` | `'fallback'\|'race'\|'aggregate'` | `'fallback'` | Strategy |
-| `fallback.maxRetries` | `number` | `1` | Retries per provider |
-| `fallback.circuitBreaker` | `CircuitBreakerConfig\|false` | enabled | Breaker config |
-| `cache` | `CacheConfig` | enabled | TTL cache |
-| `signal` | `AbortSignal` | — | Cancel entire search |
+| Option                        | Type                                        | Default      | Description                     |
+|-------------------------------|---------------------------------------------|--------------|---------------------------------|
+| `query`                       | `string`                                    | *(required)* | Search query                    |
+| `providers`                   | `string[]`                                  | auto-detect  | Provider priority list by id    |
+| `count`                       | `number`                                    | `5`          | Results to return (1–20)        |
+| `country`                     | `string`                                    | —            | ISO 3166-1 alpha-2              |
+| `language`                    | `string`                                    | —            | ISO 639-1                       |
+| `freshness`                   | `'day'\|'week'\|'month'\|'year'`             | —            | Time filter                     |
+| `timeout`                     | `number`                                    | `15000`      | Per-provider timeout (ms)       |
+| `minResults`                  | `number`                                    | `1`          | Min results for success         |
+| `fallback.mode`               | `'fallback'\|'race'\|'aggregate'`            | `'fallback'` | Strategy                        |
+| `fallback.maxRetries`         | `number`                                    | `1`          | Retries per provider            |
+| `fallback.circuitBreaker`     | `CircuitBreakerConfig\|false`                | enabled      | Breaker config                  |
+| `cache`                       | `CacheConfig`                               | enabled      | TTL cache                       |
+| `signal`                      | `AbortSignal`                               | —            | Cancel entire search            |
 
 ### `ReliableSearchResult`
 
 ```ts
 interface ReliableSearchResult {
   results: UnifiedSearchResult[];
-  provider: string;              // provider that served the response
-  providerPath: string[];        // full call chain e.g. ['brave', 'tavily', 'ddg']
+  provider: string;
+  providerPath: string[];
   fallbackReason?: string;
-  attempts: AttemptRecord[];     // per-provider attempt diagnostics
+  attempts: AttemptRecord[];
   elapsedMs: number;
-  retrievalSucceeded: boolean;   // did we get usable results?
-  usableForReview: boolean;      // are results ready for downstream consumption?
-  resultStatus: ResultStatus;    // 'success' | 'partial' | 'no_results' | 'failed' | 'aborted'
+  retrievalSucceeded: boolean;
+  usableForReview: boolean;
+  resultStatus: ResultStatus;
+  cacheHit: boolean;
 }
 ```
 
-## Fallback modes
+## Fallback Modes
 
-| Mode | Behavior |
-|------|----------|
-| `fallback` | Try providers in priority order, skip on empty/fail |
-| `race` | Fire all, first success wins, losers aborted via AbortController |
-| `aggregate` | Fire all, merge all successful results |
+| Mode        | Behavior                                                          |
+|-------------|-------------------------------------------------------------------|
+| `fallback`  | Try providers in priority order, skip on empty/fail               |
+| `race`      | Fire all, first success wins, losers aborted via AbortController  |
+| `aggregate` | Fire all, merge all successful results                            |
 
-## Custom providers
+## Configuration
+
+The CLI stores user config in:
+
+- **Linux**: `${XDG_CONFIG_HOME:-~/.config}/reliable-web-search/`
+- **macOS**: `~/.config/reliable-web-search/`
+- **Windows**: `%APPDATA%/reliable-web-search/`
+
+Files:
+
+- `config.json` — providers, strategy, timeout, connected hosts
+- `credentials.json` — API keys (permissions restricted to `0600` on Unix)
+
+Environment variables take priority over credential files. API keys are never written into agent host configs — hosts start `rws mcp` which reads credentials locally.
+
+> **Security note**: Credentials are stored as plaintext protected by file permissions, not the OS keychain. Use environment variables if you need stronger protection.
+
+## Custom Providers
 
 ```ts
 import { registry } from 'reliable-web-search';
@@ -142,12 +194,14 @@ const myProvider: SearchProvider = {
 registry.register(myProvider);
 ```
 
-## Architecture decisions
+## Architecture
 
-- **Zero runtime dependencies** — uses only `fetch` (Node 18+)
+- **Core SDK** — zero runtime dependencies (uses `fetch` in Node 18+)
+- **CLI** — adds `@modelcontextprotocol/sdk`, `zod`, `@inquirer/prompts` for interactive setup and MCP transport
 - **ESM + CJS dual output** — works with both `import` and `require`
-- **Provider factory pattern** — injectable API key resolver, fetch, and config (env vars are just the default)
 - **Typed ProviderError** — includes providerId, status code, retryability, and breaker impact
+
+The search core remains lightweight. The CLI adds small dependencies for interactive setup and MCP transport.
 
 ## License
 
