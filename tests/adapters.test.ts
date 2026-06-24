@@ -16,7 +16,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  mkdtempSync, writeFileSync, chmodSync, rmSync, mkdirSync, existsSync, readFileSync,
+  mkdtempSync, writeFileSync, chmodSync, rmSync, mkdirSync, readFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -24,8 +24,8 @@ import { spawnSync } from 'node:child_process';
 
 const CLI = join(process.cwd(), 'dist', 'cli.js');
 
-// Skip until adapters are implemented (commit 5)
-const skipAll = 'host adapters not yet implemented (pending commit 5)';
+// Adapter tests use fake executables (no real host CLI needed)
+const skipAll = undefined;
 
 let fakeHome: string;
 let fakeBin: string;
