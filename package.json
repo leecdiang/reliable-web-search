@@ -55,7 +55,12 @@
     "test:watch": "node --import tsx --test --watch tests/*.test.ts tests/**/*.test.ts",
     "test:smoke": "npm run build && node --test tests/smoke.test.mjs",
     "prepublishOnly": "npm run build && npm test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check-deps": "npm audit && npm ls"
+  },
+  "bin": {
+    "rws": "./dist/cli.js",
+    "reliable-web-search": "./dist/cli.js"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
@@ -66,5 +71,8 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "sideEffects": false
+  "sideEffects": false,
+  "dependencies": {
+    "@inquirer/prompts": "^8.5.2"
+  }
 }

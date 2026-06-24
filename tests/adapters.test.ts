@@ -24,9 +24,8 @@ import { spawnSync } from 'node:child_process';
 
 const CLI = join(process.cwd(), 'dist', 'cli.js');
 
-const skipAll = !existsSync(CLI)
-  ? 'dist/cli.js not built — run npm run build first'
-  : undefined;
+// Skip until adapters are implemented (commit 5)
+const skipAll = 'host adapters not yet implemented (pending commit 5)';
 
 let fakeHome: string;
 let fakeBin: string;

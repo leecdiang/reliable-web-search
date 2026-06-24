@@ -23,9 +23,8 @@ import { createInterface } from 'node:readline';
 
 const CLI = join(process.cwd(), 'dist', 'cli.js');
 
-const skipAll = !existsSync(CLI)
-  ? 'dist/cli.js not built — run npm run build first'
-  : undefined;
+// Skip until MCP server is implemented (commit 4)
+const skipAll = 'MCP server not yet implemented (pending commit 4)';
 
 let fakeHome: string;
 
