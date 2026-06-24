@@ -23,20 +23,22 @@ import { createInterface } from 'node:readline';
 
 const CLI = join(process.cwd(), 'dist', 'cli.js');
 
-// Skip until MCP server is implemented (commit 4)
-const skipAll = 'MCP server not yet implemented (pending commit 4)';
+const skipAll = !existsSync(CLI)
+  ? 'dist/cli.js not built — run npm run build first'
+  : undefined;
 
 let fakeHome: string;
 
 /** Minimal MCP client for integration testing */
 interface JsonRpcRequest {
   jsonrpc: '2.0';
-  id: number;
+  id?: number;
   method: string;
   params?: Record<string, unknown>;
 }
 
-function request(id: number, method: string, params?: Record<string, unknown>): JsonRpcRequest {
+function request(id: number | null, method: string, params?: Record<string, unknown>): Record<string, unknown> {
+  if (id === null) return { jsonrpc: '2.0', method, params };
   return { jsonrpc: '2.0', id, method, params };
 }
 
@@ -87,10 +89,12 @@ async function mcpRoundtrip(
       proc.stdin?.write(msg);
       sent++;
       if (sent < messages.length) {
-        setTimeout(sendNext, 50);
+        // Longer delay after initialize to let server respond before sending notification
+        const delay = messages[sent]?.id !== undefined ? 50 : 50;
+        setTimeout(sendNext, delay);
       } else {
         // Give time for last response then close
-        setTimeout(() => proc.stdin?.end(), 500);
+        setTimeout(() => proc.stdin?.end(), 1000);
       }
     };
 
@@ -112,7 +116,8 @@ describe('MCP — stdio handshake', { skip: skipAll }, () => {
   it('completes initialize → listTools → shutdown', async () => {
     const results = await mcpRoundtrip(
       [
-        request(1, 'initialize', { protocolVersion: '2024-11-05', capabilities: {} }),
+        request(1, 'initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'rws-test', version: '0.0.0' } }),
+        request(null, 'notifications/initialized', {}),
         request(2, 'tools/list'),
         request(3, 'shutdown'),
       ],
@@ -153,7 +158,8 @@ describe('MCP — stdio handshake', { skip: skipAll }, () => {
 
     const results = await mcpRoundtrip(
       [
-        request(1, 'initialize', { protocolVersion: '2024-11-05', capabilities: {} }),
+        request(1, 'initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'rws-test', version: '0.0.0' } }),
+        request(null, 'notifications/initialized', {}),
         request(2, 'tools/call', {
           name: 'reliable_web_search',
           arguments: { query: 'hello world', count: 2 },
@@ -186,7 +192,7 @@ describe('MCP — stdio handshake', { skip: skipAll }, () => {
     await new Promise<void>((resolve) => {
       // After init, send something and check stdout
       setTimeout(() => {
-        proc.stdin?.write(JSON.stringify(request(1, 'initialize', { protocolVersion: '2024-11-05', capabilities: {} })) + '\n');
+        proc.stdin?.write(JSON.stringify(request(1, 'initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'rws-test', version: '0.0.0' } })) + '\n');
       }, 200);
       setTimeout(() => resolve(), 800);
     });
@@ -228,7 +234,7 @@ describe('MCP — credentials safety', { skip: skipAll }, () => {
     let stderr = '';
     proc.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
 
-    proc.stdin?.write(JSON.stringify(request(1, 'initialize', { protocolVersion: '2024-11-05', capabilities: {} })) + '\n');
+    proc.stdin?.write(JSON.stringify(request(1, 'initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'rws-test', version: '0.0.0' } })) + '\n');
     await new Promise((r) => setTimeout(r, 500));
     proc.kill();
 
