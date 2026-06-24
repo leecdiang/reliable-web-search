@@ -46,15 +46,23 @@ export const openClawAdapter: AgentHostAdapter = {
   },
 
   async install(input: HostInstallInput): Promise<HostInstallResult> {
+    // Check existing first
     const state = await this.inspect();
     if (state.configured) {
       return { configured: true, configLocation: '(already configured)' };
     }
 
     const rws = resolveRwsCommand();
-    const r = spawnSync('openclaw', ['mcp', 'add', input.serverName, '--', rws.command, ...rws.args], {
+
+    // Build args array: --arg mcp (repeatable per arg)
+    const addArgs = ['mcp', 'add', input.serverName, '--command', rws.command];
+    for (const arg of rws.args) {
+      addArgs.push('--arg', arg);
+    }
+
+    const r = spawnSync('openclaw', addArgs, {
       encoding: 'utf-8',
-      timeout: 10_000,
+      timeout: 15_000,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
@@ -62,8 +70,13 @@ export const openClawAdapter: AgentHostAdapter = {
       return { configured: true };
     }
 
-    // Try alternative: mcp set
-    const r2 = spawnSync('openclaw', ['mcp', 'set', input.serverName, '--command', rws.command, '--args', rws.args.join(' ')], {
+    // Try alternative: mcp set with JSON
+    const setJson = JSON.stringify({
+      command: rws.command,
+      args: rws.args,
+      transport: 'stdio',
+    });
+    const r2 = spawnSync('openclaw', ['mcp', 'set', input.serverName, setJson], {
       encoding: 'utf-8',
       timeout: 10_000,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -96,7 +109,7 @@ export const openClawAdapter: AgentHostAdapter = {
   },
 
   async uninstall(): Promise<HostUninstallResult> {
-    const r = spawnSync('openclaw', ['mcp', 'remove', 'reliable-web-search'], {
+    const r = spawnSync('openclaw', ['mcp', 'unset', 'reliable-web-search'], {
       encoding: 'utf-8',
       timeout: 5_000,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -106,16 +119,9 @@ export const openClawAdapter: AgentHostAdapter = {
       return { removed: true, details: 'OpenClaw MCP server removed' };
     }
 
-    // Try mcp delete as fallback
-    const r2 = spawnSync('openclaw', ['mcp', 'delete', 'reliable-web-search'], {
-      encoding: 'utf-8',
-      timeout: 5_000,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
     return {
-      removed: r2.status === 0,
-      details: r2.status === 0 ? 'OpenClaw MCP server removed' : `Failed: ${r2.stderr || r.stderr || 'unknown error'}`,
+      removed: r.status === 0,
+      details: r.status === 0 ? 'OpenClaw MCP server removed' : `Failed: ${r.stderr || 'unknown error'}`,
     };
   },
 };

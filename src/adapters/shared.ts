@@ -58,17 +58,16 @@ export function detectCli(command: string): CliInfo {
  * Get the real path of the rws binary to use in host configs.
  */
 export function resolveRwsCommand(): { command: string; args: string[] } {
-  const rwsPath = process.argv[1] ?? '';
-
-  if (rwsPath.includes('rws') || rwsPath.includes('reliable-web-search') || rwsPath.includes('dist/cli.js')) {
-    // We're running as the rws CLI — use process.execPath + script path
-    return { command: process.execPath, args: [rwsPath, 'mcp'] };
-  }
-
-  // Try to find rws on PATH
+  // Prefer global rws on PATH (stable, survives temp dir cleanup)
   const which = spawnSync('which', ['rws'], { encoding: 'utf-8', timeout: 2_000 });
   if (which.status === 0 && which.stdout?.trim()) {
     return { command: which.stdout.trim(), args: ['mcp'] };
+  }
+
+  // Fall back to current process path
+  const rwsPath = process.argv[1] ?? '';
+  if (rwsPath.includes('rws') || rwsPath.includes('reliable-web-search') || rwsPath.includes('dist/cli.js')) {
+    return { command: process.execPath, args: [rwsPath, 'mcp'] };
   }
 
   // Last resort: npx with current version
