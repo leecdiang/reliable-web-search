@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.3.0] — 2026-06-24
+
+### Added
+- **Unified CLI (`rws`)** — single entry point: `npm install --global reliable-web-search && rws`
+- **Interactive setup wizard** — provider selection, hidden API key input, connection verification,
+  agent detection, multi-host installation in one continuous flow
+- **Subcommands**: `rws setup`, `rws search`, `rws config`, `rws doctor`, `rws connect`, `rws disconnect`
+- **MCP stdio server (`rws mcp`)** — exposes `reliable_web_search` tool using
+  official `@modelcontextprotocol/sdk`
+- **Host adapter system** with `AgentHostAdapter` interface:
+  - **OpenClaw** — auto-detect + install via `openclaw mcp add`
+  - **Codex** — auto-detect + install via `codex mcp add`
+  - **Claude Code** — auto-detect + install via `claude mcp add --transport stdio`
+  - **Generic MCP** — standard MCP config output for any MCP client
+- **Local configuration storage**:
+  - `config.json` + `credentials.json` in platform-aware config directory
+  - Environment variable override with priority over credential files
+  - Atomic writes (temp file + fsync + rename)
+  - Credential file permissions enforced at `0600` on Unix
+  - Corrupted config detection (warn, don't overwrite)
+- **Key masking** — `BSA••••7A9` display for API keys in all outputs
+- **`rws doctor`** — health checks for Node.js, config, credentials, providers, MCP, and agents
+- **CLI options**: `--json`, `--verbose`, `--strategy`, `--provider`, `--count`, `--live`, `--no-save`
+- **Tool schema validation** via `zod` in MCP server
+- **Config schema** with runtime validation and versioning
+
+### Changed
+- Build now produces dual entry: `src/index.ts` (SDK) + `src/cli.ts` (CLI)
+- `package.json` bin field: `rws` and `reliable-web-search` → `./dist/cli.js`
+- README top section: install-first UX (`rws` before SDK code)
+- Dependency policy updated: core remains zero-dependency; CLI adds `@modelcontextprotocol/sdk`,
+  `zod`, `@inquirer/prompts` for MCP transport and interactive setup
+
+### Test Suite
+- **183 tests** (136 original + 47 new):
+  - 14 CLI tests (help, non-TTY, query shorthand, JSON output, key masking)
+  - 18 config unit tests (masking, validation, load/save, credentials, env override)
+  - 11 adapter tests (detect, install, idempotency, multi-adapter independence)
+  - 4 MCP integration tests (initialize→listTools→callTool→shutdown, credential safety)
+  - 8 smoke tests (packaged CLI help, config path, doctor, MCP handshake)
+
 ## [0.2.0] — 2026-06-19
 
 ### Added

@@ -1,6 +1,6 @@
 {
   "name": "reliable-web-search",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Multi-provider web search with automatic fallback, circuit breaking, and zero-config defaults — for AI agents and resilient apps.",
   "keywords": [
     "web-search",
