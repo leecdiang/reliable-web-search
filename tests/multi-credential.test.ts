@@ -231,4 +231,91 @@ describe('Fallback chain route-aware execution', () => {
     assert.ok(providerPath.includes('tavily.personal'));
     assert.ok(providerPath.includes('brave.default'));
   });
+
+  it('env route is ephemeral and not in config', async () => {
+    const savedHome = process.env.HOME;
+    const fh = mkdtempSync(join(tmpdir(), 'rws-env-route-'));
+    const cfDir = join(fh, '.config', 'reliable-web-search');
+    mkdirSync(cfDir, { recursive: true });
+    process.env.HOME = fh;
+
+    try {
+      process.env.TAVILY_API_KEY = '***';
+
+      const { detectEphemeralEnvRoutes, resolveAllRoutes, resolveEnvKey } = await import('../src/config/route-resolver.js');
+      await import('../src/index.js');
+
+      assert.equal(resolveEnvKey('tavily'), '***');
+
+      const envRoutes = detectEphemeralEnvRoutes();
+      const tavilyEnv = envRoutes.find((r: any) => r.providerId === 'tavily');
+      assert.ok(tavilyEnv, 'Should generate env route for tavily');
+      assert.equal(tavilyEnv!.routeId, 'tavily.env');
+      assert.equal(tavilyEnv!.ephemeral, true);
+
+      const { saveCredentialProfiles } = await import('../src/config/credentials.js');
+      saveCredentialProfiles({
+        'tavily.default': { id: 'tavily.default', providerId: 'tavily', label: 'Default', apiKey: 'file-key', enabled: true },
+      });
+
+      const { saveConfig } = await import('../src/config/save.js');
+      saveConfig({
+        version: 2, defaultStrategy: 'fallback',
+        routes: [{ id: 'tavily.default', providerId: 'tavily', credentialRef: 'tavily.default', priority: 10, enabled: true }],
+        count: 5, timeoutMs: 15000, connectedHosts: [],
+      });
+
+      const allRoutes = resolveAllRoutes();
+      assert.ok(allRoutes.some((r: any) => r.routeId === 'tavily.env'), 'Should include env route');
+      assert.ok(allRoutes.some((r: any) => r.routeId === 'tavily.default'), 'Should include file route');
+
+      // Verify env route is NOT persisted
+      try {
+        const { readFileSync } = await import('node:fs');
+        const configContent = readFileSync(join(cfDir, 'config.json'), 'utf-8');
+        assert.ok(!configContent.includes('.env'), 'Config should not contain .env route');
+      } catch { /* ok */ }
+    } finally {
+      delete process.env.TAVILY_API_KEY;
+      process.env.HOME = savedHome;
+      rmSync(fh, { recursive: true, force: true });
+    }
+  });
+
+  it('same key env and file profile dedup', async () => {
+    const savedHome = process.env.HOME;
+    const fh = mkdtempSync(join(tmpdir(), 'rws-dedup-'));
+    mkdirSync(join(fh, '.config', 'reliable-web-search'), { recursive: true });
+    process.env.HOME = fh;
+
+    try {
+      const sharedKey = '***';
+      process.env.TAVILY_API_KEY = sharedKey;
+
+      const { saveCredentialProfiles } = await import('../src/config/credentials.js');
+      saveCredentialProfiles({
+        'tavily.default': { id: 'tavily.default', providerId: 'tavily', label: 'Default', apiKey: sharedKey, enabled: true },
+      });
+
+      await import('../src/index.js');
+      const { resolveAllRoutes } = await import('../src/config/route-resolver.js');
+
+      const { saveConfig } = await import('../src/config/save.js');
+      saveConfig({
+        version: 2, defaultStrategy: 'fallback',
+        routes: [{ id: 'tavily.default', providerId: 'tavily', credentialRef: 'tavily.default', priority: 10, enabled: true }],
+        count: 5, timeoutMs: 15000, connectedHosts: [],
+      });
+
+      const allRoutes = resolveAllRoutes();
+      const tavilyRoutes = allRoutes.filter((r: any) => r.providerId === 'tavily');
+      // Should have exactly 1 route since env key == file key
+      assert.equal(tavilyRoutes.length, 1, 'Env and file same key should produce 1 route, got ' + tavilyRoutes.length);
+      assert.ok(!tavilyRoutes[0]!.ephemeral, 'Should use file route not ephemeral env route');
+    } finally {
+      delete process.env.TAVILY_API_KEY;
+      process.env.HOME = savedHome;
+      rmSync(fh, { recursive: true, force: true });
+    }
+  });
 });

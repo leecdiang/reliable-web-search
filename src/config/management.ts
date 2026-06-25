@@ -98,10 +98,16 @@ export async function addCredential(providerId: string, labelArg?: string): Prom
 // ── Remove credential ────────────────────────────────
 
 export async function removeCredential(profileId: string, opts?: { yes?: boolean }): Promise<void> {
+  // Reject ephemeral env profiles
+  if (profileId.endsWith('.env')) {
+    console.log('Cannot remove ephemeral environment credential. Unset the ' + profileId.replace('.env', '').toUpperCase() + '_API_KEY environment variable instead.');
+    return;
+  }
+
   const profiles = loadCredentialProfiles();
   const profile = profiles[profileId];
   if (!profile) {
-    console.log(`Credential "${profileId}" not found.`);
+    console.log('Credential "' + profileId + '" not found.');
     return;
   }
 
@@ -110,12 +116,12 @@ export async function removeCredential(profileId: string, opts?: { yes?: boolean
   const referencingRoutes = config.routes.filter(r => r.credentialRef === profileId);
 
   if (referencingRoutes.length > 0) {
-    console.log(`Credential "${profileId}" is referenced by ${referencingRoutes.length} route(s).`);
+    console.log('Credential "' + profileId + '" is referenced by ' + referencingRoutes.length + ' route(s).');
 
     let proceed = opts?.yes === true;
     if (!proceed && isTTY()) {
       proceed = await confirm({
-        message: `Delete ${referencingRoutes.length} associated route(s) along with the credential?`,
+        message: 'Delete ' + referencingRoutes.length + ' associated route(s) along with the credential?',
         default: true,
       });
     } else if (!proceed) {
@@ -133,11 +139,11 @@ export async function removeCredential(profileId: string, opts?: { yes?: boolean
       ...config,
       routes: remainingRoutes,
     });
-    console.log(`✓ Removed ${referencingRoutes.length} associated route(s)`);
+    console.log('Removed ' + referencingRoutes.length + ' associated route(s)');
   }
 
   removeCredentialProfile(profileId);
-  console.log(`✓ Credential "${profileId}" removed`);
+  console.log('Credential "' + profileId + '" removed');
 }
 
 // ── Disable / Enable credential ──────────────────────
@@ -156,26 +162,41 @@ export function toggleCredential(profileId: string, enabled: boolean): void {
 // ── List routes ──────────────────────────────────────
 
 export function listRoutes(): void {
+  // Show ephemeral env routes + configured file routes
+  const { detectEphemeralEnvRoutes } = require('./route-resolver.js');
+  const envRoutes: Array<{ routeId: string; providerId: string; credentialProfile?: string }> = detectEphemeralEnvRoutes();
   const { config } = loadConfigV2();
 
-  if (config.routes.length === 0) {
+  const lines: string[] = [];
+  let displayId = 1;
+
+  // Ephemeral env routes first
+  for (const r of envRoutes) {
+    lines.push('  ' + (displayId++) + '. ' + r.providerId + '/' + (r.credentialProfile ?? 'env') + ' [env]');
+  }
+
+  // Configured routes
+  const envRouteIds = new Set(envRoutes.map(r => r.routeId));
+  const sorted = (config.routes as Array<{ id: string; providerId: string; label?: string; enabled: boolean; priority: number }>).slice().sort((a, b) => a.priority - b.priority);
+  for (const r of sorted) {
+    // Skip routes that are already covered by ephemeral env (same key)
+    if (envRouteIds.has(r.id)) continue;
+    if (envRouteIds.has(r.providerId + '.env')) {
+      // Check if file profile has same key
+      continue; // dedup handled by route-resolver
+    }
+    const label = r.label ? '/' + r.label : '';
+    const status = r.enabled ? '' : ' [disabled]';
+    lines.push('  ' + (displayId++) + '. ' + r.providerId + label + status);
+  }
+
+  if (lines.length === 0) {
     console.log('No routes configured.');
     return;
   }
 
   console.log('Search routes (in execution order):\n');
-
-  const sorted = [...config.routes].sort((a, b) => {
-    if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
-    return a.priority - b.priority;
-  });
-
-  for (let i = 0; i < sorted.length; i++) {
-    const r = sorted[i]!;
-    const label = r.label ? `${r.label}` : r.id;
-    const status = r.enabled ? '' : ' [disabled]';
-    console.log(`  ${i + 1}. ${r.providerId} / ${label} (pri: ${r.priority})${status}`);
-  }
+  console.log(lines.join('\n'));
 }
 
 // ── Move route ───────────────────────────────────────

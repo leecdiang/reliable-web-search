@@ -1,16 +1,17 @@
 /**
  * config/route-resolver.ts — Resolve routes into executable provider attempts.
  *
- * Given v2 routes + credential profiles, produces an ordered list of
- * (provider, apiKey?) pairs that the fallback chain can execute.
- *
- * Also handles v1 backward compat: simple provider ids expand to default routes.
+ * v0.4.0 behavior:
+ * - Env vars ({PROVIDER}_API_KEY) generate ephemeral <provider>.env routes
+ *   that are higher priority than configured file-based routes.
+ * - Ephemeral env routes are NOT persisted in config.json or credentials.json.
+ * - Same-key dedup: if env key == file key, only one route is generated.
  */
-import type { SearchProvider, ProviderRoute, CredentialProfile, ProviderExecutionContext } from '../types.js';
+import type { SearchProvider, CredentialProfile } from '../types.js';
 import { registry } from '../providers/registry.js';
 import { loadCredentialProfiles } from './credentials.js';
 import { loadConfigV2 } from './load.js';
-import type { RwsConfigV2, ProviderRouteData } from './schema.js';
+import type { ProviderRouteData } from './schema.js';
 
 export interface RouteAttempt {
   routeId: string;
@@ -19,50 +20,46 @@ export interface RouteAttempt {
   apiKey?: string;
   credentialProfile?: string;
   credentialProfileId?: string;
+  /** True when this route comes from env vars, not config/credentials files */
+  ephemeral?: boolean;
+}
+
+// ── Known env-var providers (non-experimental, requiresKey) ──────
+
+const ENV_PROVIDERS = ['tavily', 'brave', 'gemini', 'serpapi', 'bocha', 'metaso', 'searxng'] as const;
+
+export function resolveEnvKey(providerId: string): string | undefined {
+  const envVar = `${providerId.toUpperCase()}_API_KEY`;
+  const val = process.env[envVar];
+  if (val && val.trim().length > 0) return val;
+  return undefined;
 }
 
 /**
- * Resolve a list of provider ids (v1 style) into a flat list of RouteAttempts.
- * Used for backward-compat SDK calls.
+ * Detect all ephemeral env-var routes.
+ * Returns them in registry priority order.
  */
-export function resolveProviderIdsToRoutes(providerIds: string[]): RouteAttempt[] {
-  const profiles = loadCredentialProfiles();
+export function detectEphemeralEnvRoutes(): RouteAttempt[] {
   const routes: RouteAttempt[] = [];
-  const used = new Set<string>();
+  const usedKeys = new Set<string>();
+  let priority = 0;
 
-  for (const pid of providerIds) {
-    // Check for matching credential profiles
-    const matching = Object.values(profiles).filter((p) => p.providerId === pid && p.enabled);
-    if (matching.length > 0) {
-      for (const profile of matching) {
-        const key = profile.apiKey;
-        if (!used.has(key)) {
-          used.add(key);
-          routes.push({
-            routeId: profile.id,
-            provider: registry.get(pid)!,
-            providerId: pid,
-            apiKey: profile.apiKey,
-            credentialProfile: profile.label,
-            credentialProfileId: profile.id,
-          });
-        }
-      }
-    } else {
-      // Keyless provider or env-only
-      const provider = registry.get(pid);
-      if (provider) {
-        // Check for env key
-        const envKey = resolveEnvKey(pid);
-        routes.push({
-          routeId: `${pid}.${envKey ? 'env' : 'keyless'}`,
-          provider,
-          providerId: pid,
-          apiKey: envKey,
-          credentialProfile: envKey ? 'env' : undefined,
-          credentialProfileId: envKey ? `${pid}.env` : undefined,
-        });
-      }
+  const all = registry.list();
+  for (const provider of all) {
+    if (!provider.requiresKey) continue;
+    const envKey = resolveEnvKey(provider.id);
+    if (envKey && !usedKeys.has(envKey)) {
+      usedKeys.add(envKey);
+      routes.push({
+        routeId: `${provider.id}.env`,
+        provider,
+        providerId: provider.id,
+        apiKey: envKey,
+        credentialProfile: "env",
+        credentialProfileId: `${provider.id}.env`,
+        ephemeral: true,
+      });
+      priority++;
     }
   }
 
@@ -70,7 +67,70 @@ export function resolveProviderIdsToRoutes(providerIds: string[]): RouteAttempt[
 }
 
 /**
- * Load v2 config and resolve all enabled routes into RouteAttempts.
+ * Resolve a list of provider ids (v1 style) into a flat list of RouteAttempts.
+ * Includes ephemeral env routes at higher priority.
+ */
+export function resolveProviderIdsToRoutes(providerIds: string[]): RouteAttempt[] {
+  const profiles = loadCredentialProfiles();
+  const routes: RouteAttempt[] = [];
+  const usedKeys = new Set<string>();
+  let priority = 0;
+
+  // 1. Ephemeral env routes first
+  for (const pid of providerIds) {
+    const provider = registry.get(pid);
+    if (!provider || !provider.requiresKey) continue;
+    const envKey = resolveEnvKey(pid);
+    if (envKey && !usedKeys.has(envKey)) {
+      usedKeys.add(envKey);
+      routes.push({
+        routeId: `${pid}.env`,
+        provider,
+        providerId: pid,
+        apiKey: envKey,
+        credentialProfile: "env",
+        credentialProfileId: `${pid}.env`,
+        ephemeral: true,
+      });
+      priority++;
+    }
+  }
+
+  // 2. File-based credential profiles
+  for (const pid of providerIds) {
+    const provider = registry.get(pid);
+    if (!provider) continue;
+    const matching = Object.values(profiles).filter((p) => p.providerId === pid && p.enabled);
+    if (matching.length > 0) {
+      for (const profile of matching) {
+        if (!usedKeys.has(profile.apiKey)) {
+          usedKeys.add(profile.apiKey);
+          routes.push({
+            routeId: profile.id,
+            provider,
+            providerId: pid,
+            apiKey: profile.apiKey,
+            credentialProfile: profile.label,
+            credentialProfileId: profile.id,
+          });
+          priority++;
+        }
+      }
+    } else if (!provider.requiresKey) {
+      routes.push({
+        routeId: pid,
+        provider,
+        providerId: pid,
+      });
+    }
+  }
+
+  return routes;
+}
+
+/**
+ * Load v2 config and resolve all routes into RouteAttempts.
+ * Ephemeral env routes are inserted at higher priority than file routes.
  */
 export function resolveAllRoutes(): RouteAttempt[] {
   const { config } = loadConfigV2();
@@ -86,6 +146,40 @@ function resolveRoutesFromData(
   const routes: RouteAttempt[] = [];
   const usedKeys = new Set<string>();
 
+  // 1. Detect ephemeral env routes — highest priority
+  //    Scan all providers that have env vars set
+  const envScanned = new Set<string>();
+  for (const provider of registry.list()) {
+    if (!provider.requiresKey || envScanned.has(provider.id)) continue;
+    envScanned.add(provider.id);
+
+    const envKey = resolveEnvKey(provider.id);
+    if (!envKey) continue;
+
+    // Skip if any route in the config also uses this same key (dedup)
+    const matchingProfile = Object.values(profiles).find(
+      (p) => p.providerId === provider.id && p.apiKey === envKey && p.enabled,
+    );
+    if (matchingProfile) {
+      // File profile has the same key — skip ephemeral; file route will pick it up
+      continue;
+    }
+
+    if (!usedKeys.has(envKey)) {
+      usedKeys.add(envKey);
+      routes.push({
+        routeId: `${provider.id}.env`,
+        provider,
+        providerId: provider.id,
+        apiKey: envKey,
+        credentialProfile: "env",
+        credentialProfileId: `${provider.id}.env`,
+        ephemeral: true,
+      });
+    }
+  }
+
+  // 2. Config-based routes (sorted by priority)
   const sorted = [...routeDatas]
     .filter((r) => r.enabled)
     .sort((a, b) => a.priority - b.priority);
@@ -94,11 +188,16 @@ function resolveRoutesFromData(
     const provider = registry.get(rd.providerId);
     if (!provider) continue;
 
-    // Credential reference specified
+    // Keyless provider
+    if (!provider.requiresKey) {
+      routes.push({ routeId: rd.id, provider, providerId: rd.providerId });
+      continue;
+    }
+
+    // Credential reference
     if (rd.credentialRef) {
       const profile = profiles[rd.credentialRef];
       if (profile && profile.enabled) {
-        // Deduplicate by API key (constant-time comparison via set membership)
         if (!usedKeys.has(profile.apiKey)) {
           usedKeys.add(profile.apiKey);
           routes.push({
@@ -109,57 +208,32 @@ function resolveRoutesFromData(
             credentialProfile: profile.label,
             credentialProfileId: rd.credentialRef,
           });
-          continue;
         }
       }
-      // Fallback: check env var
-      const envKey = resolveEnvKey(rd.providerId);
-      if (envKey && !usedKeys.has(envKey)) {
-        usedKeys.add(envKey);
-        routes.push({
-          routeId: `${rd.providerId}.env`,
-          provider,
-          providerId: rd.providerId,
-          apiKey: envKey,
-          credentialProfile: 'env',
-          credentialProfileId: `${rd.providerId}.env`,
-        });
-        continue;
-      }
-    }
-
-    // No credential ref — keyless provider or env-only
-    if (!provider.requiresKey) {
-      routes.push({
-        routeId: rd.id,
-        provider,
-        providerId: rd.providerId,
-      });
     } else {
-      // Requires key — check env
-      const envKey = resolveEnvKey(rd.providerId);
-      if (envKey && !usedKeys.has(envKey)) {
-        usedKeys.add(envKey);
+      // No credential ref — check env (already handled by ephemeral step 1)
+      // Also check for any file profile for this provider
+      const anyProfile = Object.values(profiles).find(
+        (p) => p.providerId === rd.providerId && p.enabled,
+      );
+      if (anyProfile && !usedKeys.has(anyProfile.apiKey)) {
+        usedKeys.add(anyProfile.apiKey);
         routes.push({
-          routeId: `${rd.providerId}.env`,
+          routeId: anyProfile.id,
           provider,
           providerId: rd.providerId,
-          apiKey: envKey,
-          credentialProfile: 'env',
-          credentialProfileId: `${rd.providerId}.env`,
+          apiKey: anyProfile.apiKey,
+          credentialProfile: anyProfile.label,
+          credentialProfileId: anyProfile.id,
         });
+      } else if (!resolveEnvKey(rd.providerId) && !anyProfile) {
+        // No env, no profile — add keyless placeholder (will fail with clear error)
+        routes.push({ routeId: rd.id, provider, providerId: rd.providerId });
       }
     }
   }
 
   return routes;
-}
-
-function resolveEnvKey(providerId: string): string | undefined {
-  const envVar = `${providerId.toUpperCase()}_API_KEY`;
-  const val = process.env[envVar];
-  if (val && val.trim().length > 0) return val;
-  return undefined;
 }
 
 export { resolveRoutesFromData };
