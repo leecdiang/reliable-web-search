@@ -81,7 +81,7 @@ describe('executeWithFallback — fallback mode', () => {
     const p2 = makeProvider('tavily', 'fail');
     await assert.rejects(
       () => executeWithFallback([p1, p2], { query: 'test', count: 5 }, { fallback: { maxRetries: 0 } }),
-      /All 2 provider.*exhausted.*brave.*tavily/,
+      /All 2 route.*exhausted.*brave.*tavily/,
     );
   });
 
@@ -95,7 +95,7 @@ describe('executeWithFallback — fallback mode', () => {
     const p1 = makeProvider('only-provider', 'empty_results');
     await assert.rejects(
       () => executeWithFallback([p1], { query: 'test', count: 5 }, { fallback: { maxRetries: 0 } }),
-      /All 1 provider.*exhausted/,
+      /All 1 route.*exhausted/,
     );
   });
 });

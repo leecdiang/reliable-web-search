@@ -291,10 +291,14 @@ async function executeFallbackCtx(
         const classified = outcome.error ? classifyError(outcome.error, ctx.provider.id) : null;
 
         if (classified) {
-          // Credential failover: rate_limited or quota_exhausted → try next credential
-          if (classified.category === 'rate_limited' && ctxs.length > 1) {
-            // Don't retry the same provider if we have other credentials
-            break;
+          // Credential failover within same provider:
+          // rate_limited → check if next route is same provider
+          if (classified.category === 'rate_limited') {
+            const currentIdx = ctxs.indexOf(ctx);
+            const nextCtx = ctxs[currentIdx + 1];
+            if (nextCtx && nextCtx.provider.id === ctx.provider.id) {
+              break; // let outer loop try next credential
+            }
           }
         }
 

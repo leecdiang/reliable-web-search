@@ -82,15 +82,24 @@ export function validate(raw: unknown): RwsConfig {
     throw new ConfigValidationError('config.connectedHosts must be an array');
   }
 
-  // v2 config — routes-based
+  // v2 config — routes-based, extract provider IDs for v1 compat
   if (obj.version >= 2) {
     if (!Array.isArray(obj.routes)) {
       throw new ConfigValidationError('config.routes must be an array for version >= 2');
     }
+    // Extract unique provider IDs from routes for backward compatibility
+    const routeProviders: string[] = [];
+    const seen = new Set<string>();
+    for (const route of obj.routes as Array<{ providerId?: string; enabled?: boolean }>) {
+      if (route.providerId && !seen.has(route.providerId)) {
+        seen.add(route.providerId);
+        routeProviders.push(route.providerId);
+      }
+    }
     return {
       version: obj.version,
       defaultStrategy: obj.defaultStrategy as RwsConfig['defaultStrategy'],
-      providers: [],
+      providers: routeProviders,
       count: obj.count,
       timeoutMs: obj.timeoutMs,
       connectedHosts: obj.connectedHosts as string[],
