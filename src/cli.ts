@@ -131,7 +131,7 @@ function parseCliArgs(argv: string[]): {
   let query = '';
   if (subcommand === 'search') {
     query = pos.slice(1).join(' ');
-  } else if (pos.length > 0 && !['setup', 'mcp', 'doctor', 'config', 'connect', 'disconnect', 'help'].includes(subcommand!)) {
+  } else if (pos.length > 0 && !['setup', 'mcp', 'doctor', 'config', 'connect', 'disconnect', 'help', 'credentials', 'routes'].includes(subcommand!)) {
     // "rws <query>" shorthand — whole positional is the query
     query = pos.join(' ');
   }
