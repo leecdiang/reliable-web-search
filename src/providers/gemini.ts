@@ -10,7 +10,7 @@
  *  returns one comprehensive answer with source links.
  */
 
-import type {
+import type { ProviderExecutionContext, 
   SearchProvider,
   SearchParams,
   ProviderSearchResult,
@@ -49,8 +49,8 @@ export const geminiProvider: SearchProvider = {
     freshnessSupport: true,
   },
 
-  async search(params: SearchParams): Promise<ProviderSearchResult> {
-    const apiKey = process.env.GEMINI_API_KEY;
+  async search(params: SearchParams, ctx?: ProviderExecutionContext): Promise<ProviderSearchResult> {
+    const apiKey = ctx?.apiKey ?? process.env.GEMINI_API_KEY;
     if (!apiKey) {
       throw new Error(apiKeyMissing('gemini'));
     }

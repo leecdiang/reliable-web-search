@@ -3,7 +3,8 @@
  */
 import type { SearchProvider, SearchParams, ReliableSearchOptions, ReliableSearchResult } from './types.js';
 import { registry } from './providers/registry.js';
-import { executeWithFallback } from './resilience/fallback-chain.js';
+import { executeWithFallback, executeWithFallbackRoutes } from './resilience/fallback-chain.js';
+import { resolveProviderIdsToRoutes } from './config/route-resolver.js';
 import { SearchCache } from './cache.js';
 
 let _cache: SearchCache | null = null;
@@ -39,7 +40,6 @@ export async function reliableSearch(
     }
   }
 
-  const providers = resolveProviders(options);
   const searchParams: SearchParams = {
     query: query.trim(),
     count: options?.count ?? 5,
@@ -49,7 +49,24 @@ export async function reliableSearch(
     signal: options?.signal,
   };
 
-  const raw = await executeWithFallback(providers, searchParams, options);
+  let raw;
+  if (options?.providers && options.providers.length > 0) {
+    // v1 style: providers string array — expand to routes
+    const routes = resolveProviderIdsToRoutes(options.providers);
+    raw = await executeWithFallbackRoutes(routes, searchParams, options);
+  } else {
+    // Auto-detect: try routes first, fall back to v1 provider list
+    const { loadConfigV2 } = await import('./config/load.js');
+    const { resolveAllRoutes } = await import('./config/route-resolver.js');
+    const { config } = loadConfigV2();
+    if (config.routes.length > 0) {
+      const routes = resolveAllRoutes();
+      raw = await executeWithFallbackRoutes(routes, searchParams, options);
+    } else {
+      const providers = resolveProviders(options);
+      raw = await executeWithFallback(providers, searchParams, options);
+    }
+  }
 
   const result: ReliableSearchResult = {
     results: raw.results.slice(0, searchParams.count),

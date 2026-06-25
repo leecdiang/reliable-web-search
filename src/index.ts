@@ -56,6 +56,12 @@ export type {
   ClassifiedError,
   ProviderError,
   AttemptRecord,
+
+  // v0.4.0 — Multi-Provider / Multi-Credential
+  CredentialProfile,
+  ProviderRoute,
+  CredentialPolicy,
+  ProviderExecutionContext,
 } from './types.js';
 export { createProviderError, isProviderError } from './types.js';
 

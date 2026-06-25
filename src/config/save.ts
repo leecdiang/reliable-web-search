@@ -1,15 +1,12 @@
 /**
- * config/save.ts — Atomic config save.
- *
- * Writes to a temp file, fsyncs, then renames to the target path.
- * This prevents partial writes and corruption on crash.
+ * config/save.ts — Atomic config save (v2 format).
  */
 import { writeFileSync, renameSync, unlinkSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { configFilePath } from './paths.js';
-import type { RwsConfig } from './schema.js';
+import type { RwsConfigV2 } from '../types.js';
 
-export function saveConfig(config: RwsConfig): void {
+export function saveConfig(config: RwsConfigV2): void {
   const target = configFilePath();
   const dir = dirname(target);
 
@@ -23,7 +20,6 @@ export function saveConfig(config: RwsConfig): void {
     writeFileSync(tmp, JSON.stringify(config, null, 2) + '\n', { mode: 0o600, encoding: 'utf-8' });
     renameSync(tmp, target);
   } catch (err) {
-    // Clean up temp file if rename failed
     try { unlinkSync(tmp); } catch { /* best effort */ }
     throw err;
   }

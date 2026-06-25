@@ -296,8 +296,19 @@ async function cmdSetup(opts: Record<string, string | boolean>): Promise<void> {
 
   try {
     saveConfig({
-      ...existing.config,
-      providers,
+      version: 2,
+      defaultStrategy: existing.config.defaultStrategy ?? 'fallback',
+      routes: providers.map((pid, i) => ({
+        id: chosen.requiresKey ? `${pid}.default` : pid,
+        providerId: pid,
+        credentialRef: chosen.requiresKey ? `${pid}.default` : undefined,
+        priority: i * 10,
+        enabled: true,
+      })),
+      count: existing.config.count,
+      timeoutMs: existing.config.timeoutMs,
+      connectedHosts: existing.config.connectedHosts,
+      credentialPolicy: 'failover',
     });
     console.log('✓ Configuration saved');
   } catch (err: unknown) {

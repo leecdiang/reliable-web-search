@@ -121,11 +121,81 @@ export interface SearchProvider {
   /** Quick check: is this provider currently configured/usable? */
   isConfigured?(): boolean;
   healthCheck?(): Promise<HealthStatus>;
-  search(params: SearchParams): Promise<ProviderSearchResult>;
+  /**
+   * Execute a search.  If `ctx.apiKey` is provided it MUST be used
+   * instead of reading from environment variables (multi-credential support).
+   */
+  search(params: SearchParams, ctx?: ProviderExecutionContext): Promise<ProviderSearchResult>;
   normalize(raw: ProviderSearchResult, query: string): UnifiedSearchResult[];
 }
 
 export type HealthStatus = 'healthy' | 'degraded' | 'unhealthy' | 'unknown';
+
+// ═══════════════════════════════════════════════════════════
+//  v0.4.0 — Multi-Provider / Multi-Credential types
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * A single credential profile — a named API key for a provider.
+ * Stored inside credentials.json (version 2).
+ */
+export interface CredentialProfile {
+  id: string;             // unique within the file, e.g. "tavily.personal"
+  providerId: string;     // e.g. "tavily"
+  label: string;          // human-readable, e.g. "Personal"
+  apiKey: string;
+  enabled: boolean;
+  createdAt?: string;     // ISO-8601
+}
+
+/**
+ * A single search route — mapping a provider + optional credential
+ * onto the ordered execution list.
+ */
+export interface ProviderRoute {
+  id: string;             // unique, e.g. "tavily.personal"
+  providerId: string;     // e.g. "tavily"
+  credentialRef?: string; // reference into credential profiles, optional for keyless providers
+  label?: string;         // optional display label
+  priority: number;       // execution order, lower = first
+  enabled: boolean;
+}
+
+/**
+ * Credential failover policy.
+ * Currently only 'failover' is supported.
+ */
+export type CredentialPolicy = 'failover';
+
+/**
+ * Provider execution context — passed into search() calls.
+ */
+export interface ProviderExecutionContext {
+  signal?: AbortSignal;
+  apiKey?: string;
+  credentialProfileId?: string;
+}
+
+/**
+ * v2 Credentials file format.
+ */
+export interface CredentialsFileV2 {
+  version: number;
+  profiles: Record<string, CredentialProfile>;
+}
+
+/**
+ * v2 Config file format.
+ */
+export interface RwsConfigV2 {
+  version: number;
+  defaultStrategy: 'fallback' | 'race' | 'aggregate';
+  routes: ProviderRoute[];
+  count: number;
+  timeoutMs: number;
+  connectedHosts: string[];
+  credentialPolicy?: CredentialPolicy;
+}
 
 // ─── Main API Options ──────────────────────────────────────
 
@@ -193,6 +263,10 @@ export interface AttemptRecord {
   elapsedMs: number;
   errorCode?: string;
   httpStatus?: number;
+  /** v0.4.0: route identifier for multi-credential execution */
+  routeId?: string;
+  /** v0.4.0: credential profile label (NOT the key) */
+  credentialProfile?: string;
 }
 
 // ─── Error Categories ──────────────────────────────────────

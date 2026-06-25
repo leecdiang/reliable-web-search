@@ -9,7 +9,7 @@
  *  Supports country, language, freshness, and search_lang.
  */
 
-import type {
+import type { ProviderExecutionContext, 
   SearchProvider,
   SearchParams,
   ProviderSearchResult,
@@ -43,8 +43,8 @@ export const braveProvider: SearchProvider = {
     freshnessSupport: true,
   },
 
-  async search(params: SearchParams): Promise<ProviderSearchResult> {
-    const apiKey = process.env.BRAVE_API_KEY;
+  async search(params: SearchParams, ctx?: ProviderExecutionContext): Promise<ProviderSearchResult> {
+    const apiKey = ctx?.apiKey ?? process.env.BRAVE_API_KEY;
     if (!apiKey) {
       throw new Error(apiKeyMissing('brave'));
     }
