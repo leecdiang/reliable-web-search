@@ -41,10 +41,12 @@ rws disconnect    # 移除 MCP 注册（供应商凭据不受影响）
 
 Agent 集成：
 
-- **OpenClaw** — 自动检测，通过 `openclaw mcp` 配置
-- **Codex** — 自动检测，通过 `codex mcp` 配置
-- **Claude Code** — 自动检测，通过 `claude mcp` 配置
-- **其他 MCP 客户端** — 通过标准 MCP 配置兼容接入（`rws mcp`）
+| 宿主          | 检测方式 | 安装方式                          | 状态              |
+|---------------|----------|-----------------------------------|-------------------|
+| OpenClaw      | 自动     | `openclaw mcp add`                | ✅ 已验证         |
+| Codex         | 自动     | `codex mcp add`                   | ⚠️ Beta           |
+| Claude Code   | 自动     | `claude mcp add --transport stdio`| ⚠️ Beta           |
+| Generic MCP   | 手动     | 标准 MCP 配置                     | 🔧 Standard MCP   |
 
 ## 快速开始 (SDK)
 

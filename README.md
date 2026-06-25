@@ -40,10 +40,12 @@ rws disconnect    # Remove MCP registrations (provider credentials stay safe)
 
 Agent integrations:
 
-- **OpenClaw** — automatically detected and configured via `openclaw mcp`
-- **Codex** — automatically detected and configured via `codex mcp`
-- **Claude Code** — automatically detected and configured via `claude mcp`
-- **Other MCP clients** — compatible through standard MCP config (`rws mcp`)
+| Host          | Detection | Installation                  | Status           |
+|---------------|-----------|-------------------------------|------------------|
+| OpenClaw      | Auto      | `openclaw mcp add`            | ✅ Verified      |
+| Codex         | Auto      | `codex mcp add`               | ⚠️ Beta          |
+| Claude Code   | Auto      | `claude mcp add --transport stdio` | ⚠️ Beta      |
+| Generic MCP   | Manual    | Standard MCP config           | 🔧 Standard MCP  |
 
 ## Quick Start (SDK)
 
