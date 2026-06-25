@@ -15,13 +15,14 @@ npm install --global reliable-web-search
 rws
 ```
 
-The setup wizard will:
+The setup wizard (v0.4.0) guides you through an **iterative multi-provider, multi-credential** workflow:
 
-1. Help you choose a search provider (Brave, Tavily, Gemini, DuckDuckGo, SerpAPI, SearXNG, Bocha, Metaso)
-2. Prompt for an API key (hidden input, never echoed)
-3. Verify the connection with a small test search
-4. Detect OpenClaw, Codex, and Claude Code on your machine
-5. Install the same `reliable_web_search` MCP tool in the selected agents
+1. Choose a search provider (Brave, Tavily, Gemini, DuckDuckGo, SerpAPI, SearXNG, Bocha, Metaso)
+2. Enter API key(s) — one per credential profile (e.g., `tavily.personal`, `tavily.backup`)
+3. Verify each credential with a small live test
+4. Continue adding more providers, add additional credentials to the same provider, adjust route order
+5. Review the ordered route list and confirm
+6. Detect OpenClaw, Codex, and Claude Code; install the MCP tool
 
 After setup:
 
@@ -29,13 +30,33 @@ After setup:
 rws "latest RISC-V news"
 ```
 
-### Other commands
+### Credential Management
 
 ```bash
-rws doctor        # Health check: Node.js, config, credentials, providers, agents
-rws setup         # Re-run the unified setup wizard
-rws connect       # Connect to detected agent hosts (or specific: openclaw, codex, claude-code, generic)
-rws disconnect    # Remove MCP registrations (provider credentials stay safe)
+rws credentials list                                  # List all credential profiles (keys masked)
+rws credentials add tavily --label personal           # Add a new credential
+rws credentials remove tavily.backup                   # Remove credential (and routes referencing it)
+rws credentials enable tavily.personal                # Re-enable a credential
+rws credentials disable tavily.backup                 # Disable without deleting
+```
+
+### Route Management
+
+```bash
+rws routes list                                       # Show search order
+rws routes move tavily.backup --before brave.default   # Reorder route
+rws routes enable|disable <route-id>                   # Toggle without deleting
+```
+
+### Other Commands
+
+```bash
+rws doctor                            # Route-aware health check (per-route config, credential status)
+rws doctor --live                     # Verify first credential for each provider
+rws doctor --live --all-credentials   # ⚠ Verify every credential (makes one real request each)
+rws setup                             # Re-run the iterative setup wizard
+rws connect                           # Connect to detected agent hosts
+rws disconnect                        # Remove MCP registrations
 ```
 
 Agent integrations:
