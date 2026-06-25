@@ -10,7 +10,7 @@
  *  answers with citations. Excellent for complex Chinese queries.
  */
 
-import type {
+import type { ProviderExecutionContext, 
   SearchProvider,
   SearchParams,
   ProviderSearchResult,
@@ -41,8 +41,8 @@ export const metasoProvider: SearchProvider = {
     experimental: true,  // API contract not yet verified against real responses
   },
 
-  async search(params: SearchParams): Promise<ProviderSearchResult> {
-    const apiKey = process.env.METASO_API_KEY;
+  async search(params: SearchParams, ctx?: ProviderExecutionContext): Promise<ProviderSearchResult> {
+    const apiKey = ctx?.apiKey ?? process.env.METASO_API_KEY;
     if (!apiKey) {
       throw new Error(apiKeyMissing('metaso'));
     }

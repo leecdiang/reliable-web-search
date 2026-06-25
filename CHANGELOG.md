@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.4.0] — 2026-06-25
+
+### Added
+- **Multi-Provider / Multi-Credential system** — configure multiple providers and multiple
+  credential profiles per provider (e.g., `tavily.personal`, `tavily.backup`, `brave.default`)
+- **Config v2** — `config.json` version 2 uses `routes[]` array instead of flat `providers[]` list;
+  `credentials.json` version 2 uses `profiles{}` map instead of flat key-value pairs
+- **Automatic v1→v2 migration** — existing configs and credentials migrated atomically with backup;
+  corrupted files detected and preserved
+- **Ephemeral env routes** — `TAVILY_API_KEY`, `BRAVE_API_KEY` etc. automatically generate
+  `<provider>.env` route at higher priority than file profiles, without persisting to disk;
+  same-key dedup prevents duplicate calls
+- **Credential failover** — `rate_limited`/`quota_exhausted`/`authentication_failure` switch to
+  next credential for same provider; `network_error`/`timeout`/`server_error` switch to next provider
+- **Iterative setup wizard** — loop-based workflow allowing multiple providers and credentials
+  before agent detection; route review and confirmation step
+- **Management commands**:
+  - `rws credentials list|add|remove|enable|disable`
+  - `rws routes list|move|enable|disable`
+- **Route-aware `rws doctor`** — per-route config completeness check, credential profile status,
+  ephemeral env route detection; `--live --all-credentials` warns and checks each credential
+- **Route-aware MCP server** — loads v2 routes; `providerPath` uses route identifiers
+  (`tavily.personal` → `tavily.backup` → `brave.default`); API keys never exposed
+- **`ProviderExecutionContext`** — search providers accept `ctx.apiKey` for injected credentials
+- **SDK backward compatibility** — old `providers: string[]` calls auto-expand to default routes
+
+### Changed
+- `rws setup` now iterative: after each credential, prompts for next action instead of jumping to agents
+- `rws doctor` shows route-level status (each configured route + ephemeral env routes)
+- `AttemptRecord` includes `routeId` and `credentialProfile` fields
+- `ProviderRoute.id` replaces `providerId` as stable attempt identifier
+- Credential file writes enforce 0600 permissions on Unix
+
+### Not Supported
+- Round-robin credential rotation
+- Usage statistics or cloud accounts
+- Automatic provider account creation
+- Web UI
+
 ## [0.3.0] — 2026-06-24
 
 ### Added

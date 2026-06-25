@@ -16,13 +16,14 @@ npm install --global reliable-web-search
 rws
 ```
 
-安装向导会帮你：
+安装向导（v0.4.0）支持 **多供应商、多凭据** 循环配置：
 
-1. 选择搜索供应商（Brave、Tavily、Gemini、DuckDuckGo、SerpAPI、SearXNG、Bocha、Metaso）
-2. 安全输入 API Key（不回显）
+1. 选择搜索供应商
+2. 输入 API Key，每个凭据可以有独立名称（如 `tavily.personal`、`tavily.backup`）
 3. 用一次小搜索验证连接
-4. 自动检测本机已安装的 OpenClaw、Codex、Claude Code
-5. 把同一个 `reliable_web_search` MCP 工具接入选中的 Agent
+4. 继续添加更多供应商或同一供应商的备用凭据，调整路由顺序
+5. 确认最终搜索路由顺序
+6. 自动检测 OpenClaw、Codex、Claude Code，接入 MCP 工具
 
 配置完成后：
 
@@ -30,13 +31,33 @@ rws
 rws "最新 RISC-V 新闻"
 ```
 
+### 凭据管理
+
+```bash
+rws credentials list                                  # 列出所有凭据（Key 已掩码）
+rws credentials add tavily --label personal           # 新增凭据
+rws credentials remove tavily.backup                   # 删除凭据（自动删除关联路由）
+rws credentials enable tavily.personal                # 重新启用
+rws credentials disable tavily.backup                 # 禁用但不删除
+```
+
+### 路由管理
+
+```bash
+rws routes list                                       # 查看搜索顺序
+rws routes move tavily.backup --before brave.default   # 调整路由顺序
+rws routes enable|disable <route-id>                   # 启用/禁用路由
+```
+
 ### 其他命令
 
 ```bash
-rws doctor        # 健康检查：Node.js、配置、凭据、供应商、Agent
-rws setup         # 重新运行统一设置向导
-rws connect       # 接入检测到的 Agent（或指定：openclaw、codex、claude-code、generic）
-rws disconnect    # 移除 MCP 注册（供应商凭据不受影响）
+rws doctor                            # 路由感知的健康检查（每条路由的凭据状态）
+rws doctor --live                     # 验证每个 Provider 的首选凭据
+rws doctor --live --all-credentials   # ⚠ 验证每个凭据（产生真实请求）
+rws setup                             # 重新运行循环设置向导
+rws connect                           # 接入检测到的 Agent
+rws disconnect                        # 移除 MCP 注册
 ```
 
 Agent 集成：

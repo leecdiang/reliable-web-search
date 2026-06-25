@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * rws — reliable-web-search CLI (v0.3.0)
+ * rws — reliable-web-search CLI (v0.4.0)
  *
  * Unified entry: `rws` → setup wizard or interactive search.
  * Supports: setup, search, mcp, doctor, config, connect, disconnect.
@@ -42,12 +42,12 @@ let mcpServerMain: (() => Promise<void>) | null = null;
 // ── CLI Help ──────────────────────────────────────────
 
 function showHelp(): void {
-  console.log(`reliable-web-search v0.3.0
+  console.log(`reliable-web-search v0.4.0
 
 Usage:
   rws                          Interactive setup or search
   rws <query>                  Quick search (shorthand for rws search)
-  rws setup                    Unified setup wizard
+  rws setup                    Unified setup wizard (multi-provider, multi-credential)
   rws search <query>           Search the web
   rws mcp                      Start MCP stdio server
   rws doctor                   Run health checks
@@ -63,12 +63,22 @@ Search options:
   --count <n>                  Number of results (1-20)
 
 Commands:
-  setup                        Launch the unified setup wizard
+  setup                        Launch the iterative setup wizard
+  credentials list             List credential profiles (keys masked)
+  credentials add <provider>   Add a credential for a provider
+  credentials remove <id>      Remove a credential profile
+  credentials enable <id>      Enable a credential
+  credentials disable <id>     Disable a credential
+  routes list                  List search routes in order
+  routes move <id> --before <other-id>  Reorder route
+  routes enable <id>           Enable a route
+  routes disable <id>          Disable a route
   connect --all                Connect to all detected hosts
   connect openclaw|codex|claude-code|generic  Connect to specific host
   disconnect --all             Disconnect from all hosts
   disconnect <host>            Disconnect from specific host
   doctor --live                Run health checks with live search test
+  doctor --live --all-credentials  Check every credential (makes real requests)
   config                       Show config summary (keys masked)
   config path                  Print config directory path
 
@@ -121,7 +131,7 @@ function parseCliArgs(argv: string[]): {
   let query = '';
   if (subcommand === 'search') {
     query = pos.slice(1).join(' ');
-  } else if (pos.length > 0 && !['setup', 'mcp', 'doctor', 'config', 'connect', 'disconnect', 'help'].includes(subcommand!)) {
+  } else if (pos.length > 0 && !['setup', 'mcp', 'doctor', 'config', 'connect', 'disconnect', 'help', 'credentials', 'routes'].includes(subcommand!)) {
     // "rws <query>" shorthand — whole positional is the query
     query = pos.join(' ');
   }
@@ -141,7 +151,7 @@ function printVersion(): void {
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
     console.log(`${pkg.version}`);
   } catch {
-    console.log('0.3.0');
+    console.log('0.4.0');
   }
 }
 
@@ -149,162 +159,28 @@ function getPackageVersion(): string {
   const pkgPath = join(__dirname, '..', 'package.json');
   try {
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-    return pkg.version ?? '0.3.0';
+    return pkg.version ?? '0.4.0';
   } catch {
-    return '0.3.0';
+    return '0.4.0';
   }
 }
 
-// ── Subcommand: setup ─────────────────────────────────
+// ── Subcommand: setup (v0.4.0 iterative wizard) ─────
 
-async function cmdSetup(opts: Record<string, string | boolean>): Promise<void> {
-  const noSave = opts['no-save'] === true;
-
-  console.log('\nWelcome to reliable-web-search\n');
-
-  // Lazy-load setup modules
-  const { loadConfig } = await import('./config/load.js');
-  const { saveConfig } = await import('./config/save.js');
-  const { saveCredentials, resolveCredential } = await import('./config/credentials.js');
-  const { registry } = await import('./providers/registry.js');
-  const { maskSecret } = await import('./config/mask-secret.js');
-
-  // Check existing config
-  const existing = loadConfig();
-  if (existing.source === 'file' && existing.warnings.length === 0) {
-    console.log('✓ Existing configuration found');
-  }
-
-  // ── Step 1: Choose provider ─────────────────────────
-  const available = registry.list();
-
-  // Filter to non-experimental for setup
-  const stable = available.filter((p) => !p.capabilities.experimental);
-
-  console.log('Choose a search provider:');
-  const displayList: { id: string; name: string; desc: string; requiresKey: boolean }[] = [];
-  for (const p of stable) {
-    let desc = p.name;
-    if (p.id === 'brave') desc += ' Recommended for general web search';
-    else if (p.id === 'tavily') desc += ' Optimized for AI agents';
-    else if (p.id === 'gemini') desc += ' Grounded AI answers';
-    else if (p.id === 'searxng') desc += ' Self-hosted';
-    else if (p.id === 'duckduckgo') desc += ' Instant Answer — limited, no key required';
-    else if (p.id === 'serpapi') desc += ' Google search via API';
-    displayList.push({ id: p.id, name: p.name, desc, requiresKey: p.requiresKey });
-  }
-
+async function cmdSetup(_opts: Record<string, string | boolean>): Promise<void> {
   if (!isTTY()) {
-    console.log('(Non-interactive mode — showing available providers)');
-    for (const d of displayList) {
-      const keyNote = d.requiresKey ? ' [requires key]' : ' [no key]';
-      console.log(`  ${d.id}: ${d.desc}${keyNote}`);
-    }
-    console.log('\nRun in a TTY for interactive setup, or set environment variables directly.');
+    console.log('Setup requires a TTY. Run `rws` interactively or use individual commands:');
+    console.log('  rws credentials add <provider> [--label <label>]');
+    console.log('  rws routes list');
+    console.log('  rws connect [host]');
     return;
   }
 
-  // Use interactive prompt
-  const { select } = await import('@inquirer/prompts');
-  const chosenId: string = await select({
-    message: 'Choose a search provider:',
-    choices: displayList.map((d) => ({
-      value: d.id,
-      name: d.name,
-      description: d.desc,
-    })),
-  });
+  // Run the iterative wizard
+  const { runSetupWizard, getWarnings } = await import('./setup/wizard.js');
+  const finalConfig = await runSetupWizard();
 
-  const chosen = stable.find((p) => p.id === chosenId);
-  if (!chosen) {
-    console.log(`Provider "${chosenId}" not found.`);
-    return;
-  }
-
-  // ── Step 2: API Key (if required) ───────────────────
-  let apiKey = '';
-  if (chosen.requiresKey && chosen.envVars.length > 0) {
-    const envVar = chosen.envVars[0]!;
-    const existingKey = resolveCredential(envVar);
-    if (existingKey) {
-      console.log(`\n✓ ${envVar} already configured (${maskSecret(existingKey)})`);
-      apiKey = existingKey;
-    } else {
-      const { password } = await import('@inquirer/prompts');
-      apiKey = await password({
-        message: `Enter ${envVar}:`,
-        mask: '*',
-      });
-      if (!apiKey || apiKey.trim().length === 0) {
-        console.log('No API key provided. Setup will use defaults.');
-      }
-    }
-  } else if (!chosen.requiresKey) {
-    console.log(`\n  ${chosen.name} does not require an API key.`);
-  }
-
-  // ── Step 3: Verify ─────────────────────────────────
-  if (apiKey && chosen.requiresKey) {
-    const { confirm } = await import('@inquirer/prompts');
-    const doVerify = await confirm({
-      message: 'Verify with one small search request?',
-      default: true,
-    });
-
-    if (doVerify) {
-      const envVar = chosen.envVars[0]!;
-      try {
-        // Temporarily set env var for this process
-        process.env[envVar] = apiKey;
-        const { reliableSearch } = await import('./reliable-search.js');
-        const result = await reliableSearch('hello world', {
-          providers: [chosen.id],
-          count: 2,
-          timeout: 10_000,
-        });
-        if (result.retrievalSucceeded) {
-          console.log('✓ Provider authenticated');
-          console.log('✓ Search returned usable results');
-        } else {
-          console.log('⚠ Provider responded but returned no results. Check your key or provider status.');
-        }
-      } catch (err: unknown) {
-        console.log(`⚠ Verification failed: ${(err as Error).message}`);
-        console.log('You can retry setup later with: rws setup');
-      } finally {
-        if (!apiKey) delete process.env[envVar];
-      }
-    }
-  }
-
-  // ── Step 4: Save credentials ───────────────────────
-  if (apiKey && chosen.requiresKey && !noSave) {
-    const envVar = chosen.envVars[0]!;
-    try {
-      saveCredentials({ [envVar]: apiKey });
-      console.log(`\n✓ API key saved to credentials file`);
-    } catch (err: unknown) {
-      console.log(`⚠ Could not save credentials: ${(err as Error).message}`);
-      console.log(`Set ${envVar} as an environment variable instead.`);
-    }
-  }
-
-  // ── Step 5: Save config ────────────────────────────
-  const providers = existing.config.providers.length > 0
-    ? existing.config.providers
-    : chosen.requiresKey ? [chosen.id] : [chosen.id, 'duckduckgo'];
-
-  try {
-    saveConfig({
-      ...existing.config,
-      providers,
-    });
-    console.log('✓ Configuration saved');
-  } catch (err: unknown) {
-    console.log(`⚠ Could not save config: ${(err as Error).message}`);
-  }
-
-  // ── Step 6: Detect agents ──────────────────────────
+  // ── Agent detection ────────────────────────────────
   console.log('\nDetecting agent environments...');
   const detected = await detectHosts();
 
@@ -329,7 +205,7 @@ async function cmdSetup(opts: Record<string, string | boolean>): Promise<void> {
     console.log('  You can run `rws connect` later.');
   }
 
-  // ── Step 7: Final report ───────────────────────────
+  // ── Final report ───────────────────────────────────
   console.log(`\nReady. Try:`);
   console.log(`  rws "latest RISC-V news"\n`);
 }
@@ -570,30 +446,50 @@ async function cmdDoctor(opts: Record<string, string | boolean>): Promise<void> 
     }
   }
 
-  // Provider auth
+  // Routes (v0.4.0)
   try {
-    const { loadConfig } = await import('./config/load.js');
+    const { loadConfigV2 } = await import('./config/load.js');
+    const { loadCredentialProfiles, resolveCredential } = await import('./config/credentials.js');
     const { registry } = await import('./providers/registry.js');
-    const { resolveCredential } = await import('./config/credentials.js');
-    const cfg = loadConfig().config;
-    const providers = cfg.providers.length > 0 ? cfg.providers : registry.detect().map((p) => p.id);
+    const { config } = loadConfigV2();
+    const profiles = loadCredentialProfiles();
 
-    for (const pid of providers) {
-      const p = registry.get(pid);
-      if (!p) continue;
-      if (!p.requiresKey) {
-        checks.push({ name: `Provider: ${pid}`, status: 'ok', detail: 'no key required' });
-        continue;
+    if (config.routes.length > 0) {
+      checks.push({ name: 'Routes configured', status: 'ok', detail: `${config.routes.filter(r => r.enabled).length} enabled of ${config.routes.length} total` });
+
+      const sorted = [...config.routes].sort((a, b) => a.priority - b.priority);
+      for (const route of sorted) {
+        const provider = registry.get(route.providerId);
+        if (!provider) { checks.push({ name: `Route: ${route.id}`, status: 'fail', detail: 'unknown provider' }); continue; }
+
+        if (!route.enabled) { checks.push({ name: `Route: ${route.id}`, status: 'warn', detail: 'disabled' }); continue; }
+
+        if (!provider.requiresKey) {
+          checks.push({ name: `Route: ${route.id}`, status: 'ok', detail: `${provider.name} (no key required)` });
+          continue;
+        }
+
+        if (route.credentialRef) {
+          const profile = profiles[route.credentialRef];
+          if (profile && profile.enabled) {
+            checks.push({ name: `Route: ${route.id}`, status: 'ok', detail: `${profile.label} (configured)` });
+          } else if (profile) {
+            checks.push({ name: `Route: ${route.id}`, status: 'warn', detail: `${profile.label} (disabled)` });
+          } else {
+            // Check env
+            const envKey = resolveCredential(provider.envVars[0] ?? '');
+            checks.push({ name: `Route: ${route.id}`, status: envKey ? 'ok' : 'warn', detail: envKey ? 'from env' : 'no credential' });
+          }
+        } else {
+          const envKey = resolveCredential(provider.envVars[0] ?? '');
+          checks.push({ name: `Route: ${route.id}`, status: envKey ? 'ok' : 'warn', detail: envKey ? 'authenticated (env)' : 'no credentials found' });
+        }
       }
-      const key = resolveCredential(p.envVars[0] ?? '');
-      checks.push({
-        name: `Provider: ${pid}`,
-        status: key ? 'ok' : 'warn',
-        detail: key ? 'authenticated' : 'no credentials found',
-      });
+    } else {
+      checks.push({ name: 'Routes', status: 'warn', detail: 'no routes configured' });
     }
   } catch (err: unknown) {
-    checks.push({ name: 'Provider auth', status: 'fail', detail: (err as Error).message });
+    checks.push({ name: 'Routes', status: 'fail', detail: (err as Error).message });
   }
 
   // Proxy
@@ -637,8 +533,16 @@ async function cmdDoctor(opts: Record<string, string | boolean>): Promise<void> 
 
   // Live search test
   if (live) {
+    const allCredentials = process.argv.includes('--all-credentials');
     try {
       const { reliableSearch } = await import('./reliable-search.js');
+
+      if (allCredentials) {
+        console.log('');
+        console.log('⚠ doctor --live --all-credentials will make one small real request per credential');
+        console.log('');
+      }
+
       const result = await reliableSearch('test', { count: 1, timeout: 10_000 });
       checks.push({
         name: 'Live search',
@@ -647,6 +551,28 @@ async function cmdDoctor(opts: Record<string, string | boolean>): Promise<void> 
           ? `✓ (${result.provider}, ${result.elapsedMs}ms)`
           : `no results (${result.provider})`,
       });
+
+      if (allCredentials) {
+        // Do per-credential verification for each enabled route
+        const { loadConfigV2 } = await import('./config/load.js');
+        const { config } = loadConfigV2();
+        for (const route of config.routes.filter(r => r.enabled)) {
+          try {
+            const cr = await reliableSearch('health', {
+              providers: [route.providerId],
+              count: 1,
+              timeout: 10_000,
+            });
+            checks.push({
+              name: `Live: ${route.id}`,
+              status: cr.retrievalSucceeded ? 'ok' : 'warn',
+              detail: cr.retrievalSucceeded ? `✓ (${cr.elapsedMs}ms)` : 'no results',
+            });
+          } catch (err: unknown) {
+            checks.push({ name: `Live: ${route.id}`, status: 'fail', detail: (err as Error).message });
+          }
+        }
+      }
     } catch (err: unknown) {
       checks.push({ name: 'Live search', status: 'fail', detail: (err as Error).message });
     }
@@ -782,6 +708,76 @@ async function cmdDisconnect(opts: Record<string, string | boolean>, positional:
   }
 }
 
+// ── Subcommand: credentials ──────────────────────────
+
+async function cmdCredentials(_opts: Record<string, string | boolean>, positional: string[]): Promise<void> {
+  const action = positional[1];
+  const arg = positional[2];
+
+  const opts = {
+    yes: _opts.yes === true || process.argv.includes('--yes'),
+    label: typeof _opts.label === 'string' ? _opts.label : undefined,
+  };
+
+  const { listCredentials, addCredential, removeCredential, toggleCredential } = await import('./config/management.js');
+
+  switch (action) {
+    case 'list':
+      listCredentials();
+      break;
+    case 'add':
+      if (!arg) { console.log('Usage: rws credentials add <provider> [--label <label>]'); return; }
+      await addCredential(arg, opts.label);
+      break;
+    case 'remove':
+    case 'rm':
+      if (!arg) { console.log('Usage: rws credentials remove <profile-id>'); return; }
+      await removeCredential(arg, { yes: opts.yes });
+      break;
+    case 'disable':
+      if (!arg) { console.log('Usage: rws credentials disable <profile-id>'); return; }
+      toggleCredential(arg, false);
+      break;
+    case 'enable':
+      if (!arg) { console.log('Usage: rws credentials enable <profile-id>'); return; }
+      toggleCredential(arg, true);
+      break;
+    default:
+      console.log('Usage: rws credentials [list|add|remove|enable|disable]');
+  }
+}
+
+// ── Subcommand: routes ───────────────────────────────
+
+async function cmdRoutes(_opts: Record<string, string | boolean>, positional: string[]): Promise<void> {
+  const action = positional[1];
+  const arg = positional[2];
+  const before = typeof _opts.before === 'string' ? _opts.before : undefined;
+
+  const { listRoutes, moveRoute, toggleRoute } = await import('./config/management.js');
+
+  switch (action) {
+    case 'list':
+      listRoutes();
+      break;
+    case 'move':
+      if (!arg) { console.log('Usage: rws routes move <route-id> --before <other-route-id>'); return; }
+      if (!before) { console.log('Usage: rws routes move <route-id> --before <other-route-id>'); return; }
+      moveRoute(arg, before);
+      break;
+    case 'disable':
+      if (!arg) { console.log('Usage: rws routes disable <route-id>'); return; }
+      toggleRoute(arg, false);
+      break;
+    case 'enable':
+      if (!arg) { console.log('Usage: rws routes enable <route-id>'); return; }
+      toggleRoute(arg, true);
+      break;
+    default:
+      console.log('Usage: rws routes [list|move|enable|disable]');
+  }
+}
+
 // ── Main Entry ────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -830,6 +826,18 @@ async function main(): Promise<void> {
   // config
   if (subcommand === 'config') {
     await cmdConfig(options, positional);
+    return;
+  }
+
+  // credentials management
+  if (subcommand === 'credentials') {
+    await cmdCredentials(options, positional);
+    return;
+  }
+
+  // routes management
+  if (subcommand === 'routes') {
+    await cmdRoutes(options, positional);
     return;
   }
 

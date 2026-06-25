@@ -10,7 +10,7 @@
  *  Supports search depth and topic filtering.
  */
 
-import type {
+import type { ProviderExecutionContext, 
   SearchProvider,
   SearchParams,
   ProviderSearchResult,
@@ -44,8 +44,8 @@ export const tavilyProvider: SearchProvider = {
     freshnessSupport: false,
   },
 
-  async search(params: SearchParams): Promise<ProviderSearchResult> {
-    const apiKey = process.env.TAVILY_API_KEY;
+  async search(params: SearchParams, ctx?: ProviderExecutionContext): Promise<ProviderSearchResult> {
+    const apiKey = ctx?.apiKey ?? process.env.TAVILY_API_KEY;
     if (!apiKey) {
       throw new Error(apiKeyMissing('tavily'));
     }

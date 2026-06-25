@@ -9,10 +9,11 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 
 import { reliableSearch } from '../reliable-search.js';
-import { loadConfig } from '../config/load.js';
-import { resolveCredential, loadCredentials } from '../config/credentials.js';
+import { loadConfigV2 } from '../config/load.js';
+import { resolveCredential, loadCredentials, loadCredentialProfiles } from '../config/credentials.js';
 import { registry } from '../providers/registry.js';
 import { configDir } from '../config/paths.js';
+import { resolveAllRoutes } from '../config/route-resolver.js';
 import { setupProxy, teardownProxy } from '../network/proxy.js';
 import type { ResultStatus } from '../types.js';
 
@@ -25,18 +26,22 @@ export async function runMcpServer(): Promise<void> {
   // Enable environment proxy at MCP process entry
   setupProxy();
 
-  // Load user config
-  const { config, warnings } = loadConfig();
+  // Load v2 config with routes
+  const { config, warnings } = loadConfigV2();
   if (warnings.length > 0) {
     log('Config warnings:', warnings.join('; '));
   }
 
-  // Set up credentials from env or file
+  // Load credentials and set up env-compat
   setupCredentials();
+
+  // Load routes for this session
+  const routes = resolveAllRoutes();
+  log(`Loaded ${routes.length} search route(s) for MCP`);
 
   const server = new McpServer({
     name: 'reliable-web-search',
-    version: '0.3.0',
+    version: '0.4.0',
   }, {
     capabilities: { tools: {} },
   });
@@ -65,7 +70,7 @@ Inspect providerPath and attempts when diagnosing failures.`,
       try {
         const result = await reliableSearch(query, {
           count: params.count ?? config.count,
-          providers: params.providers?.length ? params.providers : config.providers.length > 0 ? config.providers : undefined,
+          providers: params.providers?.length ? params.providers : undefined,
           fallback: params.strategy
             ? { mode: params.strategy }
             : { mode: config.defaultStrategy },
@@ -158,7 +163,7 @@ Inspect providerPath and attempts when diagnosing failures.`,
 
   log(`MCP server started`);
   log(`Config dir: ${configDir()}`);
-  log(`Providers: ${config.providers.length > 0 ? config.providers.join(', ') : 'auto-detect'}`);
+  log(`Routes: ${routes.map(r => r.routeId).join(', ')}`);
   log(`Strategy: ${config.defaultStrategy}`);
 }
 

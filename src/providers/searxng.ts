@@ -12,7 +12,7 @@
  *  Default endpoint: http://localhost:8080 (if SEARXNG_BASE_URL unset)
  */
 
-import type {
+import type { ProviderExecutionContext, 
   SearchProvider,
   SearchParams,
   ProviderSearchResult,
@@ -53,7 +53,7 @@ export const searxngProvider: SearchProvider = {
     return typeof url === 'string' && url.trim().length > 0;
   },
 
-  async search(params: SearchParams): Promise<ProviderSearchResult> {
+  async search(params: SearchParams, ctx?: ProviderExecutionContext): Promise<ProviderSearchResult> {
     const baseUrl = process.env.SEARXNG_BASE_URL;
     if (!baseUrl || !baseUrl.trim()) {
       throw new Error('missing_api_key: SearXNG requires SEARXNG_BASE_URL environment variable pointing to your instance.');

@@ -96,13 +96,14 @@ describe('Config load/save with fake HOME', () => {
   it('loadConfig returns defaults when no file exists', () => {
     const result = loadConfig();
     assert.equal(result.source, 'default');
-    assert.deepEqual(result.config, DEFAULT_CONFIG);
+    // v0.4.0 default includes a DuckDuckGo route
+    assert.deepEqual(result.config.providers, ['duckduckgo']);
     assert.equal(result.warnings.length, 0);
   });
 
   it('saveConfig writes and loadConfig reads back', () => {
     const cfg = { ...DEFAULT_CONFIG, providers: ['brave', 'duckduckgo'], defaultStrategy: 'race' as const };
-    saveConfig(cfg);
+    saveConfig({ version: 2, defaultStrategy: 'race', routes: [{ id: 'brave.default', providerId: 'brave', priority: 10, enabled: true }, { id: 'duckduckgo', providerId: 'duckduckgo', priority: 20, enabled: true }], count: 5, timeoutMs: 15000, connectedHosts: [], credentialPolicy: 'failover' });
     const result = loadConfig();
     assert.equal(result.source, 'file');
     assert.deepEqual(result.config.providers, ['brave', 'duckduckgo']);
@@ -124,8 +125,7 @@ describe('Config load/save with fake HOME', () => {
   });
 
   it('atomic save does not leave .tmp files', () => {
-    const cfg = { ...DEFAULT_CONFIG, providers: ['tavily'] };
-    saveConfig(cfg);
+    saveConfig({ version: 2, defaultStrategy: 'fallback', routes: [{ id: 'tavily.default', providerId: 'tavily', priority: 10, enabled: true }], count: 5, timeoutMs: 15000, connectedHosts: [], credentialPolicy: 'failover' });
     const configDir = join(fakeHome, '.config', 'reliable-web-search');
     const files = readdirSync(configDir);
     const tmpFiles = files.filter((f: string) => f.endsWith('.tmp'));
@@ -176,12 +176,13 @@ describe('Credentials with fake HOME', () => {
     delete process.env.BRAVE_API_KEY;
   });
 
-  it('resolveCredential falls back to file', () => {
+  it('resolveCredential falls back to profile', () => {
     saveCredentials({ BRAVE_API_KEY: 'file-key' });
     delete process.env.BRAVE_API_KEY;
     const source = { from: 'none' as const };
     const value = resolveCredential('BRAVE_API_KEY', undefined, source as any);
     assert.equal(value, 'file-key');
-    assert.equal((source as any).from, 'file');
+    // v0.4.0 stores credentials as profiles
+    assert.equal((source as any).from, 'profile');
   });
 });
