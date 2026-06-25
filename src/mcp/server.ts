@@ -13,6 +13,7 @@ import { loadConfig } from '../config/load.js';
 import { resolveCredential, loadCredentials } from '../config/credentials.js';
 import { registry } from '../providers/registry.js';
 import { configDir } from '../config/paths.js';
+import { setupProxy, teardownProxy } from '../network/proxy.js';
 import type { ResultStatus } from '../types.js';
 
 function log(...args: unknown[]): void {
@@ -21,6 +22,9 @@ function log(...args: unknown[]): void {
 }
 
 export async function runMcpServer(): Promise<void> {
+  // Enable environment proxy at MCP process entry
+  setupProxy();
+
   // Load user config
   const { config, warnings } = loadConfig();
   if (warnings.length > 0) {
@@ -135,6 +139,8 @@ Inspect providerPath and attempts when diagnosing failures.`,
   const cleanup = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
+    // Restore original dispatcher before exit
+    teardownProxy();
     try {
       await server.close();
     } catch {

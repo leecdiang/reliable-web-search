@@ -10,6 +10,9 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// ── Environment proxy support ────────────────────────
+import { setupProxy } from './network/proxy.js';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
@@ -593,6 +596,21 @@ async function cmdDoctor(opts: Record<string, string | boolean>): Promise<void> 
     checks.push({ name: 'Provider auth', status: 'fail', detail: (err as Error).message });
   }
 
+  // Proxy
+  const { getProxyStatus } = await import('./network/proxy.js');
+  const ps = getProxyStatus();
+  if (ps.detected) {
+    checks.push({
+      name: 'Environment proxy',
+      status: ps.enabled ? 'ok' : 'warn',
+      detail: ps.enabled
+        ? `enabled (source: ${ps.source}, host: ${ps.hostname})${ps.noProxy ? `, NO_PROXY: ${ps.noProxy}` : ''}`
+        : `detected but not active (source: ${ps.source})`,
+    });
+  } else {
+    checks.push({ name: 'Environment proxy', status: 'ok', detail: 'not configured' });
+  }
+
   // MCP handshake
   try {
     checks.push({ name: 'MCP server', status: 'ok', detail: 'available (rws mcp)' });
@@ -767,6 +785,9 @@ async function cmdDisconnect(opts: Record<string, string | boolean>, positional:
 // ── Main Entry ────────────────────────────────────────
 
 async function main(): Promise<void> {
+  // Enable environment proxy at process entry
+  setupProxy();
+
   const argv = process.argv.slice(2);
   const { subcommand, query, options, positional } = parseCliArgs(argv);
 
